@@ -57,9 +57,15 @@ export interface DataStore {
   counters: Record<string, number>;
   /** Node-side session fallback; browsers use localStorage (see auth.ts). */
   session: Session | null;
+  /**
+   * Processed webhook event keys — the fake `wa_webhook_events` unique
+   * index (T8). Runtime-only, never seeded: a fresh store accepts every
+   * event again, exactly like a re-seeded demo database.
+   */
+  waWebhookEvents: Set<string>;
 }
 
-type SeedShape = Omit<DataStore, "counters" | "session">;
+type SeedShape = Omit<DataStore, "counters" | "session" | "waWebhookEvents">;
 
 function buildStore(): DataStore {
   const seed: SeedShape = {
@@ -73,7 +79,12 @@ function buildStore(): DataStore {
     waMessages: [...seedWaMessages],
   };
 
-  return { ...seed, counters: collectCounters(seed), session: null };
+  return {
+    ...seed,
+    counters: collectCounters(seed),
+    session: null,
+    waWebhookEvents: new Set<string>(),
+  };
 }
 
 function collectCounters(seed: SeedShape): Record<string, number> {

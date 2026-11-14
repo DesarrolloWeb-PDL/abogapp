@@ -1,25 +1,31 @@
 import type { NextRequest } from "next/server";
+import { processInboundPayload, verifyHubSignature } from "@/lib/data";
 
 /**
  * Meta WhatsApp Business Cloud API webhook (Module A — assumption).
  *
- * M1 stub (T2): GET performs the standard Meta verification handshake and
- * POST acknowledges the payload with 200. Nothing is verified against a
- * signature and nothing is stored yet — X-Hub-Signature-256 checking, event
- * idempotency (wa_webhook_events.event_key) and the bot reply land in T8.
+ * T8: GET performs the verification handshake, POST authenticates the
+ * delivery with X-Hub-Signature-256, stores each event exactly once (the
+ * fake `wa_webhook_events` unique index) and runs the local rule-based bot.
+ * The Graph API call that would deliver our reply to the client is not made
+ * here — M1 makes no Meta calls at all; the reply lives in the inbox.
+ *
+ * No hardcoded fallbacks: both secrets come from the environment and the
+ * route refuses to answer without them (see `.env.example`).
  */
 
-/** Dev fallback so the handshake is testable before env vars exist. */
-const EXPECTED_VERIFY_TOKEN =
-  process.env.WHATSAPP_VERIFY_TOKEN ?? "m1-dev-verify-token";
-
 export async function GET(request: NextRequest) {
+  const expected = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (!expected) {
+    return new Response("Webhook verification is not configured", { status: 503 });
+  }
+
   const { searchParams } = request.nextUrl;
   const mode = searchParams.get("hub.mode");
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
-  if (mode === "subscribe" && token === EXPECTED_VERIFY_TOKEN && challenge) {
+  if (mode === "subscribe" && token === expected && challenge) {
     // Meta expects the challenge echoed back as plain text.
     return new Response(challenge, {
       status: 200,
@@ -31,8 +37,35 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  // Acknowledge immediately: Meta retries until it sees a 200. Processing
-  // (signature check, inbox row, bot reply) is deferred to T8.
-  await request.text().catch(() => undefined);
-  return Response.json({ received: true });
+  const secret = process.env.WHATSAPP_APP_SECRET;
+  if (!secret) {
+    return Response.json(
+      { error: "webhook_not_configured" },
+      { status: 503 },
+    );
+  }
+
+  // Read the raw body once: the signature covers these exact bytes.
+  const body = await request.text();
+  const signature = request.headers.get("x-hub-signature-256");
+  if (!verifyHubSignature(body, signature, secret)) {
+    return Response.json({ error: "invalid_signature" }, { status: 401 });
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return Response.json({ error: "invalid_payload" }, { status: 400 });
+  }
+
+  // Store + bot reply. Duplicates (Meta retries) are dropped inside.
+  const result = await processInboundPayload(payload);
+
+  // Meta retries until it sees a 200 — always acknowledge a valid delivery.
+  return Response.json({
+    received: true,
+    accepted: result.accepted,
+    duplicates: result.duplicates,
+  });
 }

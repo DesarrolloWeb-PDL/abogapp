@@ -66,6 +66,6 @@ Veredicta brand name marketing copy and manual content,docs,could,yes,skip,brand
 Veredicta users network and stored data,data,should,yes,skip,their users and stored data cannot be cloned
 Court portals themselves (PJN / MEV and others),judicial-sync,should,yes,skip,third-party public systems; only our own connectors may touch them
 Sworn-lawyer declaration sign-up flow,auth,should,yes,skip,their legal attestation; validate lawyers our own way
-WhatsApp intake bot (Module A),whatsapp,must,no,partial,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1: webhook GET handshake + POST 200 ack only; X-Hub-Signature-256, event idempotency and bot reply are pending (T8)
-WhatsApp conversation inbox,whatsapp,must,no,yes,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1: /bandeja inbox, our own design (no reference screen)
+WhatsApp intake bot (Module A),whatsapp,must,no,partial,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1 (T8): GET handshake requires WHATSAPP_VERIFY_TOKEN (no hardcoded fallback), POST verifies X-Hub-Signature-256, stores each event exactly once and runs the local rule-based bot; Graph API delivery and the 24h window are pending (M3)
+WhatsApp conversation inbox,whatsapp,must,no,yes,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1 (T8): /bandeja lists conversations from GET /api/wa/conversations with status filters plus loading, error, empty and no-results states; own design (no reference screen)
 Appointment booking via WhatsApp,whatsapp,must,no,no,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M3

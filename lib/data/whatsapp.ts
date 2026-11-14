@@ -54,6 +54,18 @@ export async function listMessages(conversationId: string): Promise<WaMessage[]>
 }
 
 /**
+ * Idempotency gate for Meta deliveries — the fake `wa_webhook_events`
+ * unique index on `event_key`. Returns true the first time a key is seen
+ * and false for every retry, so a duplicate webhook becomes a no-op.
+ */
+export function markEventProcessed(eventKey: string): boolean {
+  const store = getStore();
+  if (store.waWebhookEvents.has(eventKey)) return false;
+  store.waWebhookEvents.add(eventKey);
+  return true;
+}
+
+/**
  * Store an inbound client message and produce the local bot reply.
  *
  * Rules (M1):

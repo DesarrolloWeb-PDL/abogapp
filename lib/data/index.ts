@@ -59,3 +59,13 @@ export { DataLayerError, ERROR_COPY, errorCopy, type DataErrorCode } from "./err
 // Seam contract for S12: the add-prueba form receives the non-working days
 // from here and hands them to computeFechaLimite — it never computes dates.
 export { nonWorkingDays } from "./calendar";
+
+// WhatsApp webhook (T8) — signature, payload parsing and the idempotent loop.
+export {
+  parseInboundMessages,
+  processInboundPayload,
+  verifyHubSignature,
+  type ParsedInbound,
+  type WebhookProcessResult,
+} from "./webhook";
+export { markEventProcessed } from "./whatsapp";
