@@ -1,0 +1,41 @@
+/*
+ * Global stylesheet for the app.
+ *
+ * The design system lives in replica/design/ (tokens.json -> tokens.css ->
+ * tailwind-theme.css). This file only wires it in: the Tailwind theme mapping
+ * already imports `tailwindcss` and the `--ds-*` custom properties, so no
+ * token values are duplicated here.
+ */
+@import "../replica/design/tailwind-theme.css";
+
+/* Make sure Tailwind scans the component and lib folders (not only app/). */
+@source "../components";
+@source "../lib";
+
+/*
+ * Base layer: document defaults from the tokens. Components always consume
+ * Tailwind roles (bg-surface, text-muted, border-input...), never raw values.
+ */
+body {
+  background-color: var(--ds-bg);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-type-base-size);
+  line-height: var(--ds-type-base-line);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Reduced motion: token-driven transitions already collapse to 0ms via
+ * tokens.css; this also neutralises utility animations such as skeleton pulses.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
