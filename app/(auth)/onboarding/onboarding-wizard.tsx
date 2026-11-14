@@ -53,24 +53,38 @@ export function OnboardingWizard() {
   }>({});
   const [finishError, setFinishError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  // Bumped by "Reintentar" so the prefill effect runs again.
+  const [reload, setReload] = useState(0);
 
   // Prefill from the session created at sign-up; no session → back to login.
+  // A failed read must surface an error with a retry, never a stuck skeleton.
   useEffect(() => {
     let cancelled = false;
-    getSession().then((session) => {
-      if (cancelled) return;
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-      setFullName(session.user.fullName);
-      setEmail(session.user.email);
-      setReady(true);
-    });
+    getSession()
+      .then((session) => {
+        if (cancelled) return;
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+        setFullName(session.user.fullName);
+        setEmail(session.user.email);
+        setReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadError(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, reload]);
+
+  function retryLoad() {
+    setLoadError(false);
+    setReload((count) => count + 1);
+  }
 
   function toggleJurisdiction(name: string) {
     setSelected((prev) =>
@@ -114,6 +128,19 @@ export function OnboardingWizard() {
       );
       setCreating(false);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-4 rounded-lg border border-border bg-surface px-6 py-12 text-center">
+        <p className="text-base text-text-muted">
+          No pudimos cargar tu perfil. Probá otra vez.
+        </p>
+        <Button variant="secondary" onClick={retryLoad}>
+          Reintentar
+        </Button>
+      </div>
+    );
   }
 
   if (!ready) {

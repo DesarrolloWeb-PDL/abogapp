@@ -5,7 +5,8 @@ import { ToastProvider } from "@/components/ui/toast";
 
 /**
  * Authenticated area: guard + app shell (sidebar / mobile bottom bar) +
- * toast host. Real session checks replace the stub in T4.
+ * toast host. The guard is client-side over the fake session today;
+ * server-side session checks arrive with Supabase (M2/backend).
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (

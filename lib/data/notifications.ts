@@ -9,8 +9,10 @@ import { getSession } from "./auth";
 import { getStore, nextId } from "./store";
 
 type NotificationListener = (notification: AppNotification) => void;
+type ChangeListener = () => void;
 
 const listeners = new Set<NotificationListener>();
+const changeListeners = new Set<ChangeListener>();
 
 /** Subscribe to emitted notifications; returns the unsubscribe function. */
 export function onNotification(
@@ -20,6 +22,22 @@ export function onNotification(
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * Subscribe to read-state changes (mark one / mark all read); returns the
+ * unsubscribe function. The shell badge re-reads `unreadCount()` on every
+ * emission so bell, sidebar and bottom bar stay in step with the page.
+ */
+export function onNotificationsChanged(listener: ChangeListener): () => void {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
+
+function emitChange(): void {
+  for (const listener of changeListeners) listener();
 }
 
 /** Called by write paths (createPrueba today, plazo-reminders later). */
@@ -40,7 +58,9 @@ export async function listNotifications(): Promise<AppNotification[]> {
 /** Mark one notification read (read-on-click deep link, S21). */
 export async function markNotificationRead(id: string): Promise<void> {
   const record = getStore().notifications.find((entry) => entry.id === id);
-  if (record) record.leida = true;
+  if (!record || record.leida) return;
+  record.leida = true;
+  emitChange();
 }
 
 /** Unread badge count for the bell. */

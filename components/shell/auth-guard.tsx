@@ -6,7 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { readDemoSession } from "@/lib/auth-stub";
 
 /**
- * Client-side guard stub for the authed routes (real auth in T4).
+ * Client-side guard for the authed routes. It only reads the fake layer's
+ * session flag today — real server-side verification arrives with Supabase
+ * (M2/backend) and replaces this stub.
  *
  * The session flag is an external store (localStorage), read with
  * useSyncExternalStore so the first client render can decide without a

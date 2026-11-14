@@ -1,15 +1,18 @@
+"use client";
+
 import Link from "next/link";
 import { Bell } from "lucide-react";
-import { seedUnreadCount } from "@/lib/seed";
+import { useUnreadCount } from "@/components/shell/use-unread-count";
 
 /**
  * Notification bell with unread badge (components.md block 2).
  * 44x44 target, count exposed in the accessible name ("N sin leer"),
- * badge capped at "9+".
+ * badge capped at "9+". The count comes from the data layer (see
+ * `useUnreadCount`), so it matches what /notificaciones shows.
  */
 
 export function NotificationBell() {
-  const unread = seedUnreadCount;
+  const unread = useUnreadCount();
   const label =
     unread > 0 ? `Notificaciones, ${unread} sin leer` : "Notificaciones";
 

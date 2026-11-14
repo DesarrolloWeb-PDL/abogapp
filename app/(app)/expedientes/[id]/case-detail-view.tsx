@@ -8,6 +8,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getCase, listPruebas } from "@/lib/data";
+import { formatDate } from "@/lib/format";
 import type { Prueba, StudyCase } from "@/lib/types";
 
 /**
@@ -287,12 +288,6 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
       )}
     </div>
   );
-}
-
-function formatDate(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-");
-  if (!year || !month || !day) return isoDate;
-  return `${day}/${month}/${year}`;
 }
 
 function formatDateTime(iso: string): string {

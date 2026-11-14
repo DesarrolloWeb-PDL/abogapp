@@ -8,6 +8,7 @@
  */
 
 import { computeFechaLimite } from "@/lib/plazos";
+import { formatDate } from "@/lib/format";
 import type { Plazo, PlazoTipo, Prueba, PruebaTipo } from "@/lib/types";
 import { requireSession } from "./auth";
 import { nonWorkingDays, toArtIsoDate } from "./calendar";
@@ -105,13 +106,6 @@ export async function createPrueba(input: CreatePruebaInput): Promise<Prueba> {
   }
 
   return prueba;
-}
-
-/** `YYYY-MM-DD` → `dd/mm/yyyy` for notification copy. */
-function formatDate(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-");
-  if (!year || !month || !day) return isoDate;
-  return `${day}/${month}/${year}`;
 }
 
 function plazoLabel(tipo: PlazoTipo, cantidad: number): string {

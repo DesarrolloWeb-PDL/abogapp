@@ -1,7 +1,7 @@
 # Build log — M1 vertical slice
 
 Scope: step 1 of the build order in `replica/architecture.md` (sign up → wizard (minimal) → manual case → prueba with plazo → in-app alert → WhatsApp ping).
-Runner: `npm test` (Vitest) — **34 tests green** as of 2026-11-14. Clean-room: every label and sentence is our own.
+Runner: `npm test` (Vitest) — **50 tests green** as of 2026-11-14. Clean-room: every label and sentence is our own.
 
 Two sessions worked this slice in parallel with declared edit surfaces (see `odd/tasks/m1-vertical-slice.md`, "Surfaces"): session A owned `lib/plazos/**`, session B owned `app/**`, `components/**` and `lib/data|seed|types|auth-stub`.
 
@@ -30,6 +30,9 @@ Two sessions worked this slice in parallel with declared edit surfaces (see `odd
 
 ## Open items
 
+- `GET /api/wa/conversations` has no session or membership check — it would expose conversation data as soon as real secrets are configured (M2/backend with Supabase RLS).
+- The demo login form renders the seed credential pair to every visitor (`app/(auth)/login/login-form.tsx`) — hide it when real auth lands (M2/backend).
+- `lib/data/store.ts` is a per-process in-memory store, so a multi-instance deployment can miss what the webhook wrote in another process (real persistence arrives with Supabase).
 - Official 2026/2027 Argentine feriado dates are still `TODO(gap)` — tests use fixtures.
 - The two webhook secrets are now required: copy `.env.example` to `.env.local` or both routes answer 503.
 - Meta Graph delivery (sending the bot reply to the client), the 24 h window and appointment booking are M3.

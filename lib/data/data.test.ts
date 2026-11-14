@@ -11,7 +11,9 @@ import {
   listCases,
   listNotifications,
   listPruebas,
+  markNotificationRead,
   nonWorkingDays,
+  onNotificationsChanged,
   signIn,
   signUp,
   unreadCount,
@@ -210,6 +212,52 @@ describe("pruebas", () => {
         expect(plazo.fechaLimite).toBe(artDate(engineDate));
       }
     }
+  });
+});
+
+describe("notifications", () => {
+  it("markNotificationRead lowers the unread count and notifies subscribers", async () => {
+    await signUpWithStudy("Estudio Nuevo");
+    const kase = await createCase({ caratula: "Expediente avisado" });
+
+    // createPrueba emits the only notification of this (new) user, so the
+    // seed rows of the demo user are never mutated by this test.
+    await createPrueba({
+      caseId: kase.id,
+      tipo: "Testimonial",
+      titulo: "Aviso de vencimiento",
+      informante: "Lucía Peralta",
+      fechaEfectiva: "2026-11-16",
+      plazo: { tipo: "corridos", cantidad: 5 },
+    });
+
+    const before = await unreadCount();
+    expect(before).toBeGreaterThan(0);
+
+    // The shell badge subscribes to this seam to re-read the count.
+    let changes = 0;
+    const unsubscribe = onNotificationsChanged(() => {
+      changes += 1;
+    });
+
+    const [emitted] = await listNotifications();
+    expect(emitted).toBeDefined();
+    if (!emitted) return;
+    await markNotificationRead(emitted.id);
+    unsubscribe();
+
+    expect(changes).toBe(1);
+    expect(await unreadCount()).toBe(before - 1);
+    expect(await unreadCount()).toBe(0);
+
+    // Marking an already-read notification again must not re-notify.
+    let extra = 0;
+    const off = onNotificationsChanged(() => {
+      extra += 1;
+    });
+    await markNotificationRead(emitted.id);
+    off();
+    expect(extra).toBe(0);
   });
 });
 

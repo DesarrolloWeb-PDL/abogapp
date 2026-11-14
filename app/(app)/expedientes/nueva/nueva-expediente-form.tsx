@@ -21,18 +21,33 @@ export function NuevaExpedienteForm() {
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [jurisdiccion, setJurisdiccion] = useState("");
+  const [prefillError, setPrefillError] = useState(false);
+  // Bumped by "Reintentar" so the prefill effect runs again.
+  const [reload, setReload] = useState(0);
 
+  // Prefill the jurisdiction from the study; a failed read must show an
+  // error with a retry instead of silently leaving the field empty.
   useEffect(() => {
     let cancelled = false;
-    getMyStudy().then((study) => {
-      if (cancelled || !study) return;
-      const first = study.jurisdictions[0];
-      if (first) setJurisdiccion(first);
-    });
+    getMyStudy()
+      .then((study) => {
+        if (cancelled || !study) return;
+        const first = study.jurisdictions[0];
+        if (first) setJurisdiccion(first);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPrefillError(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reload]);
+
+  function retryPrefill() {
+    setPrefillError(false);
+    setReload((count) => count + 1);
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,6 +101,20 @@ export function NuevaExpedienteForm() {
           estudio.
         </p>
       </div>
+
+      {prefillError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3"
+        >
+          <p className="text-sm font-medium text-danger">
+            No pudimos cargar la jurisdicción de tu estudio.
+          </p>
+          <Button variant="secondary" size="sm" onClick={retryPrefill}>
+            Reintentar
+          </Button>
+        </div>
+      )}
 
       <form onSubmit={onSubmit} noValidate className="flex max-w-2xl flex-col gap-5">
         <FormField

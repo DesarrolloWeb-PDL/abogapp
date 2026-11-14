@@ -41,6 +41,7 @@ export {
   listNotifications,
   markNotificationRead,
   onNotification,
+  onNotificationsChanged,
   unreadCount,
 } from "./notifications";
 
@@ -66,6 +67,7 @@ export {
   processInboundPayload,
   verifyHubSignature,
   type ParsedInbound,
+  type ProcessInboundOptions,
   type WebhookProcessResult,
 } from "./webhook";
-export { markEventProcessed } from "./whatsapp";
+export { markEventProcessed, releaseEventKey } from "./whatsapp";

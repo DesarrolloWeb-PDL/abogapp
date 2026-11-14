@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { Bell, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
-import { seedUnreadCount } from "@/lib/seed";
+import { useUnreadCount } from "@/components/shell/use-unread-count";
 
 /**
  * M1 navigation subset: Expedientes, Bandeja WhatsApp and Notificaciones.
@@ -20,7 +20,8 @@ export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  badge?: number;
+  /** Marks the entry whose badge shows the unread notification count. */
+  showsUnread?: boolean;
 }
 
 export const mainNavItems: NavItem[] = [
@@ -30,7 +31,7 @@ export const mainNavItems: NavItem[] = [
     href: "/notificaciones",
     label: "Notificaciones",
     icon: Bell,
-    badge: seedUnreadCount,
+    showsUnread: true,
   },
 ];
 
@@ -45,6 +46,8 @@ function isActivePath(activePath: string | null, href: string): boolean {
 }
 
 function NavList({ activePath, collapsed }: NavListProps) {
+  const count = useUnreadCount();
+
   return (
     <nav aria-label="Navegación principal" className="flex flex-col gap-1 px-3 py-4">
       <p className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-text-muted">
@@ -53,7 +56,7 @@ function NavList({ activePath, collapsed }: NavListProps) {
       {mainNavItems.map((item) => {
         const active = isActivePath(activePath, item.href);
         const Icon = item.icon;
-        const unread = item.badge ?? 0;
+        const unread = item.showsUnread ? count : 0;
 
         return (
           <Link

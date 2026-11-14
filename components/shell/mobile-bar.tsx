@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { Bell, FolderOpen, MessageSquare } from "lucide-react";
 import { NotificationBell } from "@/components/shell/notification-bell";
-import { seedUnreadCount } from "@/lib/seed";
+import { useUnreadCount } from "@/components/shell/use-unread-count";
 
 /**
  * Mobile shell (<768px, recon S38): a top bar with brand + bell and a
@@ -17,7 +17,8 @@ interface BottomItem {
   href: string;
   label: string;
   icon: typeof FolderOpen;
-  badge?: number;
+  /** Marks the entry whose badge shows the unread notification count. */
+  showsUnread?: boolean;
 }
 
 const bottomItems: BottomItem[] = [
@@ -27,7 +28,7 @@ const bottomItems: BottomItem[] = [
     href: "/notificaciones",
     label: "Avisos",
     icon: Bell,
-    badge: seedUnreadCount,
+    showsUnread: true,
   },
 ];
 
@@ -52,6 +53,8 @@ export function MobileHeader() {
 }
 
 function BottomItems({ activePath }: { activePath: string | null }) {
+  const count = useUnreadCount();
+
   return (
     <nav
       aria-label="Navegación principal"
@@ -61,7 +64,7 @@ function BottomItems({ activePath }: { activePath: string | null }) {
         const active =
           activePath === item.href || activePath?.startsWith(`${item.href}/`);
         const Icon = item.icon;
-        const unread = item.badge ?? 0;
+        const unread = item.showsUnread ? count : 0;
 
         return (
           <Link

@@ -9,6 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { listCases } from "@/lib/data";
+import { formatDate } from "@/lib/format";
 import type { StudyCase } from "@/lib/types";
 
 /**
@@ -25,14 +26,6 @@ type LoadState =
 
 /** Stable empty list so hook dependencies never churn between renders. */
 const EMPTY_CASES: StudyCase[] = [];
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
 
 const etapaTone: Record<string, "neutral" | "info" | "warning" | "success"> = {
   Inicial: "neutral",

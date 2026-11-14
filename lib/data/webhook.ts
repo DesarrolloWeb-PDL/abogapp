@@ -10,13 +10,15 @@
  *  - `X-Hub-Signature-256` is HMAC-SHA256 of the raw body with the app
  *    secret, compared in constant time;
  *  - `wa_webhook_events.event_key` is unique, so Meta's retries insert
- *    conflict into no-ops (here: `markEventProcessed` returns false);
+ *    conflict into no-ops (here: `markEventProcessed` returns false), while
+ *    a failed handler rolls the key back (`releaseEventKey`) so the retry
+ *    is still processed;
  *  - the handler answers 200 fast and does the work inline for M1 — the
  *    async fan-out (Inngest) arrives with the real jobs.
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { handleInboundMessage, markEventProcessed } from "./whatsapp";
+import { handleInboundMessage, markEventProcessed, releaseEventKey } from "./whatsapp";
 
 /**
  * Constant-time check of Meta's `X-Hub-Signature-256` header
@@ -90,13 +92,27 @@ export interface WebhookProcessResult {
   replies: string[];
 }
 
+export interface ProcessInboundOptions {
+  /**
+   * Test seam: swap the inbound handler. A failing handler exercises the
+   * key-release path — Meta's retry must still be processed.
+   */
+  handleInbound?: typeof handleInboundMessage;
+}
+
 /**
  * Store every fresh inbound message exactly once and collect the bot's
  * replies. Duplicate deliveries (Meta retries) are counted and dropped.
+ *
+ * When the handler fails the event key is released before the rejection
+ * propagates, so the route answers with an error and Meta's retry of the
+ * same delivery is processed instead of being dropped as a duplicate.
  */
 export async function processInboundPayload(
   payload: unknown,
+  options: ProcessInboundOptions = {},
 ): Promise<WebhookProcessResult> {
+  const handle = options.handleInbound ?? handleInboundMessage;
   const result: WebhookProcessResult = { accepted: 0, duplicates: 0, replies: [] };
 
   for (const message of parseInboundMessages(payload)) {
@@ -104,13 +120,18 @@ export async function processInboundPayload(
       result.duplicates += 1;
       continue;
     }
-    const outcome = await handleInboundMessage({
-      phone: message.phone,
-      contactName: message.contactName,
-      text: message.text,
-    });
-    result.accepted += 1;
-    if (outcome.botReply) result.replies.push(outcome.botReply);
+    try {
+      const outcome = await handle({
+        phone: message.phone,
+        contactName: message.contactName,
+        text: message.text,
+      });
+      result.accepted += 1;
+      if (outcome.botReply) result.replies.push(outcome.botReply);
+    } catch (error) {
+      releaseEventKey(message.eventKey);
+      throw error;
+    }
   }
 
   return result;

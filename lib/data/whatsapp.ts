@@ -66,6 +66,16 @@ export function markEventProcessed(eventKey: string): boolean {
 }
 
 /**
+ * Give an event key back after `handleInboundMessage` failed: the delivery
+ * was not stored, so the gate must not swallow Meta's retry as a duplicate.
+ * Counterpart of `markEventProcessed`, mirroring a rolled-back insert of
+ * `wa_webhook_events`.
+ */
+export function releaseEventKey(eventKey: string): void {
+  getStore().waWebhookEvents.delete(eventKey);
+}
+
+/**
  * Store an inbound client message and produce the local bot reply.
  *
  * Rules (M1):

@@ -37,7 +37,7 @@ Google Calendar sync,agenda,could,yes,no,S12 and S17; Google Calendar status row
 File upload with per-case folders,documentos,should,yes,no,S18; breadcrumb + storage meter + upload panel
 File preview and version list,documentos,should,yes,no,S19; thin evidence
 Protected folders and permission padlock,documentos,should,yes,no,S18; system documents / pruebas / assistant attachments
-In-app notification panel and page,notificaciones,must,yes,yes,S21; six categories; read-on-click + deep links | M1: /notificaciones page + header bell (deep links pending)
+In-app notification panel and page,notificaciones,must,yes,partial,S21; six categories; read-on-click + deep links | M1: /notificaciones page + header bell render from the data layer; read-on-click deep links and categories in M2
 Daily email digest Mon-Fri 08:00,notificaciones,must,yes,no,F06 Resumen diario | M2 (Resend + jobs not in M1)
 Notification preferences per category,notificaciones,should,yes,no,S21 Preferencias; thin evidence
 Web push (desktop + Android),notificaciones,could,yes,no,F06; no iOS push so email digest only
