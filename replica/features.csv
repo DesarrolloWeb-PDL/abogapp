@@ -1,0 +1,71 @@
+feature,area,priority,original,clone,notes
+Email and password sign-up and login,auth,must,yes,yes,S01 and S02; no credit card required at sign-up | M1: implemented (S01/S02 pages + forms)
+Google sign-in and passkey login,auth,should,yes,no,S01 and S26; passkey flow evidenced in security docs
+Two-factor auth and backup codes,auth,should,yes,no,S26 Seguridad page; thin evidence (index lines only)
+Five-step onboarding wizard (jurisdictions / profile / studio),auth,must,yes,partial,S03; creates the studio right after sign-up | M1: steps 1-3 of 5 (jurisdicciones / perfil / estudio); steps 4-5 arrive in M2
+Email invitations for teammates,auth,should,yes,no,S28; invitee landing screen evidenced in configurar-tu-estudio
+PJN connector (CUIT/CUIL credential verify),judicial-sync,should,yes,no,S25; terms forbid scraping so build our own connector
+MEV sync via email forwarding,judicial-sync,should,yes,no,S25; six-step forwarding setup without credentials
+Other portal connectors (EJE / IOL / SED / PCJ),judicial-sync,could,yes,no,S25 catalogue; prioritize after PJN and MEV
+Background sync scheduler with status chips,judicial-sync,should,yes,no,S25; Conectada / Sincronizando / Error; ~30 min cadence
+Sync error handling and rate-limit retry,judicial-sync,should,yes,no,F01 edges; five attempts then stop then auto-retry 2 min to 6 h
+Manual case creation,expedientes,must,yes,yes,Module B MVP entry point; S07 Nuevo expediente | M1: implemented (S07 create form through the data layer)
+Expedientes list with search and filters,expedientes,must,yes,partial,S07; accent and typo tolerant search + Filtros panel | M1: list + text search done; filters panel, favorites and archive in M2
+Case detail hub with tabs,expedientes,must,yes,partial,S08; Resumen cards + deep-link ?tab= (values unknown) | M1: Resumen + Pruebas tabs with ?tab= deep link; remaining tabs in M2
+Favorites / archive / soft-delete cases,expedientes,must,yes,no,S07 row menu and bulk bar; favorites are studio-wide | M2
+Vista general cross-case matrix,expedientes,could,yes,no,S15; read-only by design; thin evidence
+Case stages (etapas) settings,expedientes,should,yes,no,S30; defines which stages count as active on Inicio
+Manual movement log per case,movimientos,must,yes,no,S09; hand-entered history distinct from portal actuaciones | M2
+Actuaciones list with estado chips,movimientos,should,yes,no,S10; synced cases only; 7 estado values
+In-app document reader with citations,movimientos,should,yes,no,S11; J and K navigation; Copiar cita with page
+Novedades judiciales feed (two views),movimientos,should,yes,no,S05 and S06; por expediente / por novedad
+Pruebas tracking (six evidence types),pruebas,must,yes,partial,S12; per-type status sets; informante from Personas | M1: create prueba (tipo, titulo, informante, fecha efectiva, plazo) with fecha limite from the engine; per-type estados and person picker in M2
+Plazos engine (horas / corridos / habiles),plazos,must,yes,yes,F03; count starts the day after fecha efectiva | M1: lib/plazos mirrors compute_fecha_limite(); 21 golden tests
+Feriados + feria + dias inhabiles calendar,plazos,must,yes,partial,F03; January and July judicial feria; provincial holidays never count | M1: engine honours system + studio days and generates feria; settings UI (S30) and official 2026/27 feriados in M2 (TODO(gap))
+Dias inhabiles settings (system + studio),plazos,must,yes,no,S30 dias-inhabiles; feeds the deadline engine | M2
+Deadline countdown color states,plazos,should,yes,no,S12; green / amber <=48h / red vencido
+Standalone deadline calculator tool,plazos,should,yes,no,S34 /tool/deadline-calculator; free on every plan
+Plazo reminder notifications (day-before / day-of),plazos,must,yes,no,F03 and F06; 07:00 to all members | M2 (Inngest jobs not in M1)
+Task creation and assignment,tareas,must,yes,no,F04; three clicks on the happy path | M2
+Task states (five defaults + custom),tareas,must,yes,no,S16; Pendiente / En curso / Para revisar / Completada / Cancelada | M2
+Kanban board and list views,tareas,should,yes,no,S16; group by estado / responsable / prioridad / expediente
+AI-created tasks (Procurador IA),tareas,could,yes,no,S16 filter Creada por; source actuacion + plazo
+Shared studio calendar (five views),agenda,should,yes,no,S17; Dia / Semana / Mes / Año / Lista
+Categories and audiencias / vencimientos overlays,agenda,should,yes,no,S17; six default categories with 11 colors
+Create event from reader shortcuts,agenda,should,yes,no,S06 and S11 Crear evento shortcut
+Google Calendar sync,agenda,could,yes,no,S12 and S17; Google Calendar status row
+File upload with per-case folders,documentos,should,yes,no,S18; breadcrumb + storage meter + upload panel
+File preview and version list,documentos,should,yes,no,S19; thin evidence
+Protected folders and permission padlock,documentos,should,yes,no,S18; system documents / pruebas / assistant attachments
+In-app notification panel and page,notificaciones,must,yes,yes,S21; six categories; read-on-click + deep links | M1: /notificaciones page + header bell (deep links pending)
+Daily email digest Mon-Fri 08:00,notificaciones,must,yes,no,F06 Resumen diario | M2 (Resend + jobs not in M1)
+Notification preferences per category,notificaciones,should,yes,no,S21 Preferencias; thin evidence
+Web push (desktop + Android),notificaciones,could,yes,no,F06; no iOS push so email digest only
+AI assistant chat with page-level citations,asistente-ia,could,yes,no,S22; effort selector + skills via / + step log
+AI drafting split view (Redactar escritos),asistente-ia,could,yes,no,F05; draft versions + Guardar en Documentos
+AI mass document review (Analisis de documentos),asistente-ia,could,yes,no,S36; index-only evidence; not in trial
+AI quota gating (weekly limits + trial),asistente-ia,could,yes,no,F05; trial five consultas per member; Pro/Max only
+MCP endpoint to connect Claude or ChatGPT,asistente-ia,could,yes,no,own implementation; Veredicta MCP is per-account Pro/Max
+Veredicta MCP server + AI prompts + proprietary text,asistente-ia,could,yes,skip,their implementation and prompts are proprietary; clean-room forbids reuse
+Roles and permissions (9 areas / 28 perms),roles,should,yes,no,S27; Dueño role fixed and undeletable; 50 roles per studio
+Read-only mode after trial ends,roles,should,yes,no,S07 and S18 banners; 14-day grace for documents
+Finanzas movements and categories,finanzas,could,yes,no,S31 and S32; thin evidence (index lines only)
+Finanzas dashboard (KPIs / aging / rentabilidad),finanzas,could,yes,no,S31; reuses the dashboard block engine
+Modelos de escritos library (750+ models),biblioteca,could,yes,skip,their content; build a smaller original library
+AI-generated jurisprudence sumarios,biblioteca,could,yes,skip,their generated content; query public SAIJ and JUBA directly
+Jurisprudencia full-text search,biblioteca,could,yes,no,S35; thin evidence; fetch SAIJ and JUBA corpora directly
+Herramientas legales (23 free tools),biblioteca,could,yes,no,S34; free on every plan including trial
+Word-like collaborative escrito editor,editor,could,yes,no,S20; save states + modes + comment threads
+Profile and security settings,config,should,yes,no,S26; name / photo / password / 2FA / passkeys
+Personas directory,config,should,yes,no,S30; feeds pruebas informantes and partes pickers
+Activity log with CSV export,config,could,yes,no,S30 Actividad; before and after values per row
+Per-screen help and tutorial overlays,config,could,yes,no,S37; lifebuoy dialog + guided click panel
+Dashboard block engine (20 block types),config,could,yes,no,S04 and S31 shared engine; scope dialog per user/studio
+Mobile responsive shell (bottom bar),mobile,should,yes,no,S38; web only with add-to-homescreen; no native app
+Veredicta brand name marketing copy and manual content,docs,could,yes,skip,brand and copy are theirs; write our own help and rename everything
+Veredicta users network and stored data,data,should,yes,skip,their users and stored data cannot be cloned
+Court portals themselves (PJN / MEV and others),judicial-sync,should,yes,skip,third-party public systems; only our own connectors may touch them
+Sworn-lawyer declaration sign-up flow,auth,should,yes,skip,their legal attestation; validate lawyers our own way
+WhatsApp intake bot (Module A),whatsapp,must,no,partial,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1: webhook GET handshake + POST 200 ack only; X-Hub-Signature-256, event idempotency and bot reply are pending (T8)
+WhatsApp conversation inbox,whatsapp,must,no,yes,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1: /bandeja inbox, our own design (no reference screen)
+Appointment booking via WhatsApp,whatsapp,must,no,no,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M3
