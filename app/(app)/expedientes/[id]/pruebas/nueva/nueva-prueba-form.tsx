@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { createPrueba, DataLayerError, errorCopy } from "@/lib/data";
 import { seedCases } from "@/lib/seed";
-import type { PruebaTipo } from "@/lib/types";
+import type { PlazoTipo, PruebaTipo } from "@/lib/types";
 
 const PRUEBA_TIPOS: PruebaTipo[] = [
   "Documental",
@@ -26,21 +28,49 @@ const PLAZO_UNITS = [
 ];
 
 /**
- * Add-prueba form (S12) — M1 stub. The plazo group (unit + quantity) is
- * captured here, but the fecha límite is always produced by the data layer:
- * this form never computes a deadline (spec S5).
+ * Add-prueba form (S12). The plazo group (unit + quantity) is captured here,
+ * but the fecha límite is always produced by the data layer: this form never
+ * computes a deadline (spec S5) — `createPrueba` feeds `lib/plazos` and the
+ * screen only ever shows what the engine returns.
  */
 export function NuevaPruebaForm({ caseId }: { caseId: string }) {
   const { toast } = useToast();
+  const router = useRouter();
   const [plazoUnit, setPlazoUnit] = useState("habiles");
+  const [saving, setSaving] = useState(false);
   const record = seedCases.find((item) => item.id === caseId);
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // T6 wires this to POST /api/cases/:id/pruebas (DB computes fecha_limite).
-    toast("Borrador: esta vista todavía no guarda pruebas.", {
-      variant: "neutral",
-    });
+    const form = new FormData(event.currentTarget);
+    const cantidadRaw = String(form.get("plazo_cantidad") ?? "").trim();
+    const cantidad = Number.parseInt(cantidadRaw, 10);
+
+    setSaving(true);
+    try {
+      await createPrueba({
+        caseId,
+        tipo: String(form.get("tipo") ?? "") as PruebaTipo,
+        titulo: String(form.get("titulo") ?? ""),
+        informante: String(form.get("informante") ?? ""),
+        fechaEfectiva: String(form.get("fecha_efectiva") ?? ""),
+        plazo:
+          cantidadRaw && Number.isInteger(cantidad) && cantidad > 0
+            ? { tipo: plazoUnit as PlazoTipo, cantidad }
+            : undefined,
+      });
+      toast("Prueba guardada.", { variant: "success" });
+      router.push(`/expedientes/${caseId}?tab=pruebas`);
+    } catch (error) {
+      const code = error instanceof DataLayerError ? error.code : null;
+      toast(
+        code
+          ? errorCopy(code)
+          : "No pudimos guardar la prueba. Probá otra vez.",
+        { variant: "error" },
+      );
+      setSaving(false);
+    }
   }
 
   return (
@@ -153,8 +183,8 @@ export function NuevaPruebaForm({ caseId }: { caseId: string }) {
         </fieldset>
 
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" size="lg">
-            Guardar prueba
+          <Button type="submit" size="lg" disabled={saving}>
+            {saving ? "Guardando…" : "Guardar prueba"}
           </Button>
           <Button
             variant="ghost"
