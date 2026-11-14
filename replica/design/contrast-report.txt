@@ -1,0 +1,58 @@
+WCAG contrast report - replica-design tokens
+Generated: 2026-11-12 (Argentina)
+Tokens:    app-abogados/replica/design/tokens.json
+Checker:   C:\Users\Usuario\.config\opencode\skills\replica-design\contrast.py (contrast.py, WCAG 2.2: body AA 4.5, large/UI 3.0)
+Scope:     all 30 declared pairs (26 text/background + 4 UI: input borders, focus/accent rings)
+
+BEFORE (raw values measured from the reference screenshots, unadjusted):
+  30 pairs, 8 failing AA
+    FAIL 3.53:1  danger   on bg          - product badge red #fb2c36 as text
+    FAIL 3.81:1  danger   on surface
+    FAIL 3.59:1  danger   on danger-tint
+    FAIL 2.29:1  success  on bg          - product status-dot green #00bc7d as text
+    FAIL 2.47:1  success  on surface
+    FAIL 2.24:1  success  on success-tint
+    FAIL 1.17:1  border-input on bg      - product input border #e5e5e5 (needs 3:1)
+    FAIL 1.26:1  border-input on surface
+  Fixed IN THE TOKENS (not per component):
+    danger      #fb2c36 -> #ae342b  (measured core of the product's own red overdue text)
+    success     #00bc7d -> #007949  (measured product green used for money text)
+    border-input #e5e5e5 -> #868686 (measured grey ladder step, 3.37:1 on bg)
+
+AFTER (final tokens):
+exit code of contrast.py = 0 (0 failures)
+
+  AAA   14.01:1  text                     on bg                   
+  AAA   15.13:1  text                     on surface              
+  AA     5.16:1  text-muted               on bg                   
+  AA     5.57:1  text-muted               on surface              
+  AAA    8.04:1  on-accent                on accent               
+  AAA   13.39:1  on-primary               on primary              
+  AAA    7.45:1  accent                   on bg                   
+  AAA    8.04:1  accent                   on surface              
+  AA     5.85:1  danger                   on bg                   
+  AA     6.31:1  danger                   on surface              
+  AA     5.95:1  danger                   on danger-tint          
+  AA     5.08:1  success                  on bg                   
+  AA     5.48:1  success                  on surface              
+  AA     4.97:1  success                  on success-tint         
+  AA     4.66:1  warning                  on bg                   
+  AA     5.03:1  warning                  on surface              
+  AA     4.62:1  warning                  on warning-tint         
+  AA     6.33:1  info                     on bg                   
+  AA     6.83:1  info                     on surface              
+  AA     5.98:1  info                     on info-tint            
+  AA     6.99:1  accent                   on accent-tint          
+  AAA   14.25:1  text                     on danger-tint          
+  AAA   13.71:1  text                     on success-tint         
+  AAA   13.90:1  text                     on warning-tint         
+  AAA   13.26:1  text                     on info-tint            
+  AAA   13.16:1  text                     on accent-tint          
+  PASS   3.37:1  border-input             on bg                   ui
+  PASS   3.64:1  border-input             on surface              ui
+  PASS   7.45:1  accent                   on bg                   ui
+  PASS   8.04:1  accent                   on surface              ui
+
+  30 pairs, 0 failing AA
+
+Verdict: AA floor met on every declared pair; 0 failures.

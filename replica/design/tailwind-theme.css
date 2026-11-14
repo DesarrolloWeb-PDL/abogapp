@@ -1,0 +1,104 @@
+/*
+ * Tailwind v4 theme mapping for replica-design tokens.
+ * Components must use ROLES (bg-surface, text-muted, border-input, bg-accent-tint),
+ * never raw hex. Values live in tokens.css; replica-brand edits tokens.json only.
+ *
+ * Usage: import this file from the app's root layout / CSS entry point.
+ */
+@import "tailwindcss";
+@import "./tokens.css";
+
+@theme inline {
+  /* colour roles map to bg-*, text-* and border-* utilities */
+  --color-bg: var(--ds-bg);
+  --color-surface: var(--ds-surface);
+  --color-border: var(--ds-border);
+  --color-border-input: var(--ds-border-input);
+  --color-text: var(--ds-text);
+  --color-text-muted: var(--ds-text-muted);
+  --color-accent: var(--ds-accent);
+  --color-on-accent: var(--ds-on-accent);
+  --color-primary: var(--ds-primary);
+  --color-on-primary: var(--ds-on-primary);
+  --color-danger: var(--ds-danger);
+  --color-danger-tint: var(--ds-danger-tint);
+  --color-success: var(--ds-success);
+  --color-success-tint: var(--ds-success-tint);
+  --color-warning: var(--ds-warning);
+  --color-warning-tint: var(--ds-warning-tint);
+  --color-info: var(--ds-info);
+  --color-info-tint: var(--ds-info-tint);
+  --color-accent-tint: var(--ds-accent-tint);
+  --color-favorite: var(--ds-favorite);
+
+  /* font families */
+  --font-sans: var(--ds-font-sans);
+  --font-mono: var(--ds-font-mono);
+
+  /* type scale (snapped 12/14/16/20/28/40) */
+  --text-xs: var(--ds-type-xs-size);
+  --text-xs--line-height: var(--ds-type-xs-line);
+  --text-xs--font-weight: var(--ds-type-xs-weight);
+
+  --text-sm: var(--ds-type-sm-size);
+  --text-sm--line-height: var(--ds-type-sm-line);
+  --text-sm--font-weight: var(--ds-type-sm-weight);
+
+  --text-base: var(--ds-type-base-size);
+  --text-base--line-height: var(--ds-type-base-line);
+  --text-base--font-weight: var(--ds-type-base-weight);
+
+  --text-lg: var(--ds-type-lg-size);
+  --text-lg--line-height: var(--ds-type-lg-line);
+  --text-lg--font-weight: var(--ds-type-lg-weight);
+
+  --text-xl: var(--ds-type-xl-size);
+  --text-xl--line-height: var(--ds-type-xl-line);
+  --text-xl--font-weight: var(--ds-type-xl-weight);
+
+  --text-display: var(--ds-type-display-size);
+  --text-display--line-height: var(--ds-type-display-line);
+  --text-display--font-weight: var(--ds-type-display-weight);
+
+  /* spacing: every token step is a multiple of 4, so Tailwind's 0.25rem base
+     (p-1=4 ... p-16=64) already matches the scale; declared for clarity. */
+  --spacing: 0.25rem;
+
+  /* radius */
+  --radius-sm: var(--ds-radius-sm);
+  --radius-md: var(--ds-radius-md);
+  --radius-lg: var(--ds-radius-lg);
+  --radius-pill: var(--ds-radius-pill);
+
+  /* shadows */
+  --shadow-card: var(--ds-shadow-card);
+  --shadow-pop: var(--ds-shadow-pop);
+
+  /* motion */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* breakpoints: sm 640 / md 768 (mobile bottom bar) / lg 1024 (assistant panel) / xl 1280 */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+}
+
+/* 44px minimum touch target for interactive elements (low-resistance audience). */
+@utility touch-target {
+  min-width: var(--ds-touch-min);
+  min-height: var(--ds-touch-min);
+}
+
+/* Body copy never drops below 16px, even when the utility asked for text-sm. */
+@utility body-copy {
+  font-size: var(--ds-body-min);
+  line-height: var(--ds-type-base-line);
+}
+
+/* Max content width for the main column (layout.content-max token). */
+@utility content-max {
+  max-width: var(--ds-layout-content-max);
+}
