@@ -715,6 +715,7 @@ $$;
 create or replace function public.seed_feria_year(p_year integer)
   returns integer language plpgsql as $$
 declare v_inserted integer := 0;
+  v_rows integer := 0;
 begin
   insert into calendar_days (study_id, day, kind, name)
   select null, d::date, 'feria', 'Feria judicial'
@@ -730,7 +731,8 @@ begin
     make_date(p_year, 7, 1), make_date(p_year, 7, 31), interval '1 day'
   ) as d
   on conflict do nothing;
-  get diagnostics v_inserted = v_inserted + row_count;
+  get diagnostics v_rows = row_count;
+  v_inserted := v_inserted + v_rows;
 
   return v_inserted;
 end;
@@ -1447,7 +1449,7 @@ begin
     'novedades', 'novedade_reads', 'integrations', 'sync_runs',
     'inbound_emails', 'persons', 'case_partes', 'plazos', 'pruebas',
     'prueba_estado_hist', 'task_statuses', 'tasks', 'event_categories',
-    'events', 'hearings', 'documents', 'document_versions', 'drafts',
+    'events', 'hearings', 'documents', 'drafts',
     'activity_logs', 'block_configs', 'fin_movements', 'fin_categorias',
     'subscriptions', 'wa_contacts', 'wa_conversations', 'wa_messages',
     'wa_appointment_slots', 'wa_appointments'
@@ -1461,6 +1463,14 @@ begin
   end loop;
 end;
 $$;
+
+-- document_versions has no study_id column: tenancy derives from the parent
+-- document, so this policy resolves it through documents.study_id.
+alter table document_versions enable row level security;
+drop policy if exists document_versions_member on document_versions;
+create policy document_versions_member on document_versions
+  using (is_member((select d.study_id from documents d where d.id = document_id)))
+  with check (is_member((select d.study_id from documents d where d.id = document_id)));
 
 -- profiles: own row only.
 alter table profiles enable row level security;
