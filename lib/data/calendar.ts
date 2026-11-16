@@ -15,6 +15,8 @@
  */
 
 import { feriaDays } from "@/lib/plazos";
+import { getDataDriver } from "./driver";
+import { fetchNonWorkingDaysSupabase } from "@/lib/supabase/calendar";
 
 /** Studio días inhábiles (calendar_days rows with a study_id). */
 const STUDIO_NON_WORKING_DAYS: readonly string[] = [];
@@ -25,11 +27,38 @@ const FERIA_YEARS = [2026, 2027] as const;
 /**
  * System + studio non-working days, pre-merged the way the SQL query merges
  * `study_id is null or study_id = p_study_id`. Stable module-level reference.
+ *
+ * The fake driver serves this static set (feria matches seed_feria_year());
+ * the supabase driver rebuilds the SAME set instance from calendar_days
+ * through `loadNonWorkingDays()`, so every consumer keeps its reference.
  */
-export const nonWorkingDays: ReadonlySet<string> = new Set([
+const nonWorkingDaysSet = new Set<string>([
   ...FERIA_YEARS.flatMap((year) => feriaDays(year)),
   ...STUDIO_NON_WORKING_DAYS,
 ]);
+
+export const nonWorkingDays: ReadonlySet<string> = nonWorkingDaysSet;
+
+/**
+ * Refresh the shared set from the active driver (S12 seam).
+ *
+ * - fake: the static set is already the truth — returns it untouched;
+ * - supabase: reads calendar_days (system rows + current study's rows) and
+ *   mutates the exported set in place, so `nonWorkingDays` keeps the exact
+ *   ReadonlySet shape the add-prueba form consumes.
+ *
+ * Under supabase the engine never runs client-side (the plazos trigger owns
+ * the computation); this loader keeps the shared reference truthful for the
+ * S12 surfaces that read it directly.
+ */
+export async function loadNonWorkingDays(): Promise<ReadonlySet<string>> {
+  if (getDataDriver() !== "supabase") return nonWorkingDays;
+
+  const days = await fetchNonWorkingDaysSupabase();
+  nonWorkingDaysSet.clear();
+  for (const day of days) nonWorkingDaysSet.add(day);
+  return nonWorkingDays;
+}
 
 /** ART = UTC−3, no daylight saving since 2009. */
 const ART_OFFSET_MS = -3 * 60 * 60 * 1000;

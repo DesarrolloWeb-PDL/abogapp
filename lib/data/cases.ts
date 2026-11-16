@@ -1,13 +1,19 @@
 /**
  * Case functions — GET/POST /api/cases and GET /api/cases/:id in miniature.
  * The future layer keeps these signatures and swaps the store for Drizzle.
+ *
+ * Driver split: the fake layer keeps its in-memory store; the supabase
+ * driver runs the same contract against `cases` under RLS — see
+ * lib/supabase/cases.ts for the query/mapping conventions.
  */
 
 import type { StudyCase } from "@/lib/types";
 import { requireSession } from "./auth";
 import { DataLayerError } from "./errors";
+import { getDataDriver } from "./driver";
 import { getStore, isoNow, nextId } from "./store";
 import { requireStudy } from "./studies";
+import { createCaseSupabase, getCaseSupabase, listCasesSupabase } from "@/lib/supabase/cases";
 
 export interface CreateCaseInput {
   caratula: string;
@@ -22,6 +28,8 @@ export interface CreateCaseInput {
 
 /** Non-archived cases of the current study, newest activity first (S07). */
 export async function listCases(): Promise<StudyCase[]> {
+  if (getDataDriver() === "supabase") return listCasesSupabase();
+
   const session = await requireSession();
   const store = getStore();
 
@@ -43,11 +51,15 @@ export async function listCases(): Promise<StudyCase[]> {
  * enough for the demo); RLS will scope this query in the real one.
  */
 export async function getCase(id: string): Promise<StudyCase | null> {
+  if (getDataDriver() === "supabase") return getCaseSupabase(id);
+
   return getStore().cases.find((entry) => entry.id === id) ?? null;
 }
 
 /** Manual case creation (S07 / M1 slice entry point). */
 export async function createCase(input: CreateCaseInput): Promise<StudyCase> {
+  if (getDataDriver() === "supabase") return createCaseSupabase(input);
+
   const study = await requireStudy();
   const session = await requireSession();
 

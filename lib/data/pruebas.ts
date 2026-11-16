@@ -1,10 +1,11 @@
 /**
  * Prueba + plazo functions — POST /api/cases/:id/pruebas in miniature.
  *
- * The fecha límite is ALWAYS produced by `computeFechaLimite` from
- * `lib/plazos` (the TS mirror of the DB trigger). This module must never
- * re-implement date math: it only feeds the engine and stores what it
- * returns, exactly as the production trigger will.
+ * Driver split: the fake layer feeds `computeFechaLimite` from `lib/plazos`
+ * (the TS mirror of the DB trigger) and stores what it returns; the supabase
+ * driver lets `trg_plazos_compute` own the computation and only reads the
+ * result back (lib/supabase/pruebas.ts). Neither branch re-implements date
+ * math — the engine (TS or SQL) is the single source of every fecha límite.
  */
 
 import { computeFechaLimite } from "@/lib/plazos";
@@ -13,9 +14,11 @@ import type { Plazo, PlazoTipo, Prueba, PruebaTipo } from "@/lib/types";
 import { requireSession } from "./auth";
 import { nonWorkingDays, toArtIsoDate } from "./calendar";
 import { DataLayerError } from "./errors";
+import { getDataDriver } from "./driver";
 import { insertNotification } from "./notifications";
 import { getStore, nextId } from "./store";
 import { requireStudy } from "./studies";
+import { createPruebaSupabase, listPruebasSupabase } from "@/lib/supabase/pruebas";
 
 export interface CreatePruebaInput {
   caseId: string;
@@ -30,12 +33,16 @@ export interface CreatePruebaInput {
 
 /** Pruebas of one case (or all of them), insertion order. */
 export async function listPruebas(caseId?: string): Promise<Prueba[]> {
+  if (getDataDriver() === "supabase") return listPruebasSupabase(caseId);
+
   const store = getStore();
   return store.pruebas.filter((entry) => !caseId || entry.caseId === caseId);
 }
 
 /** Create a prueba and, when a plazo is given, its deadline + alert (S12). */
 export async function createPrueba(input: CreatePruebaInput): Promise<Prueba> {
+  if (getDataDriver() === "supabase") return createPruebaSupabase(input);
+
   const study = await requireStudy();
   const session = await requireSession();
 
