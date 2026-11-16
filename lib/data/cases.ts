@@ -21,8 +21,11 @@ export interface CreateCaseInput {
   fuero?: string;
   jurisdiccion?: string;
   juzgado?: string;
+  /** Stage NAME from listStages(); the supabase driver resolves it to the
+   *  `cases.etapa_id` FK. Empty → the fake layer defaults to "Inicial". */
   etapa?: string;
   tipo?: StudyCase["tipo"];
+  /** Free-text responsable; empty falls back to the creator's full name. */
   responsable?: string;
 }
 

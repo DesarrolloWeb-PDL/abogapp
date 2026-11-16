@@ -15,16 +15,19 @@ import { requireStudy } from "@/lib/data/studies";
 import { getBrowserClient } from "./client";
 
 /**
- * Every column StudyCase reads, plus the two embeds that carry the fields
- * the cases table has no direct column for:
- *  - `etapa`  → case_stages.name (cases stores etapa_id; no stages are
- *    seeded yet, so new rows read back as "" until S30 lands);
- *  - `responsable` → profiles.full_name of created_by (the fake layer
- *    defaults it to the session's full name — same person).
+ * Every column StudyCase reads, plus the two embeds/relations that carry the
+ * fields the cases table stores differently:
+ *  - `etapa`  → case_stages.name (cases stores etapa_id, the uuid FK; the
+ *    stages are seeded per study by init_study_defaults, so the join
+ *    resolves from the first expediente on);
+ *  - `responsable` → the free-text S07 column, falling back at map time to
+ *    the profiles.full_name of created_by for rows written before the
+ *    column existed (the fake layer defaults it to the session's full name —
+ *    same person).
  */
 const CASE_COLUMNS =
   "id, study_id, caratula, numero, fuero, jurisdiccion, juzgado, tipo, " +
-  "favorito, archivado, created_at, last_activity_at, " +
+  "favorito, archivado, created_at, last_activity_at, responsable, " +
   "etapa:case_stages(name), created_by:profiles(full_name)";
 
 interface CaseRow {
@@ -40,6 +43,7 @@ interface CaseRow {
   archivado: boolean;
   created_at: string;
   last_activity_at: string;
+  responsable: string | null;
   etapa: { name: string } | null;
   created_by: { full_name: string | null } | null;
 }
@@ -88,9 +92,30 @@ export async function createCaseSupabase(
   const caratula = input.caratula.trim();
   if (!caratula) throw new DataLayerError("missing_fields");
 
-  // TODO(schema gap): `input.etapa` (free text) needs a case_stages row and
-  // `input.responsable` has no column — cases.etapa_id stays null and
-  // responsable reads back from created_by's profile until S30/M2.
+  // Etapa: StudyCase.etapa carries the stage NAME (the fake layer stores it
+  // that way too); cases stores the uuid FK `etapa_id`. Resolve the name
+  // against the study's case_stages — the form only offers rows from
+  // listStages(), so a miss means the stage was deleted while the form was
+  // open: the case is still created and reads back with no etapa, exactly
+  // like any other null FK.
+  const etapaName = input.etapa?.trim();
+  let etapaId: string | null = null;
+  if (etapaName) {
+    const { data: stage, error: stageError } = await supabase
+      .from("case_stages")
+      .select("id")
+      .eq("study_id", study.id)
+      .eq("name", etapaName)
+      .maybeSingle();
+    if (stageError) throw new DataLayerError("save_failed");
+    etapaId = stage?.id ?? null;
+  }
+
+  // responsable: null means "not stated" — mapCase falls back to the
+  // creator's profile full name, which is the same default the form
+  // pre-fills (the current user's full name).
+  const responsable = input.responsable?.trim() || null;
+
   const { data: row, error } = await supabase
     .from("cases")
     .insert({
@@ -101,6 +126,8 @@ export async function createCaseSupabase(
       jurisdiccion: input.jurisdiccion?.trim() ?? "",
       juzgado: input.juzgado?.trim() ?? "",
       tipo: input.tipo ?? "Judicial",
+      etapa_id: etapaId,
+      responsable,
       favorito: false,
       archivado: false,
       source: "manual",
@@ -135,7 +162,9 @@ function mapCase(row: CaseRow): StudyCase {
     juzgado: row.juzgado ?? "",
     etapa: row.etapa?.name ?? "",
     tipo: row.tipo === "Extrajudicial" ? "Extrajudicial" : "Judicial",
-    responsable: row.created_by?.full_name ?? "",
+    // Old rows predate the responsable column: fall back to the creator's
+    // profile full name (the person the fake layer would have defaulted to).
+    responsable: row.responsable ?? row.created_by?.full_name ?? "",
     favorite: row.favorito,
     archived: row.archivado,
     createdAt: row.created_at,

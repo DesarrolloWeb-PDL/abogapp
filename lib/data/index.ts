@@ -37,6 +37,9 @@ export {
 // Cases (S07)
 export { createCase, getCase, listCases, type CreateCaseInput } from "./cases";
 
+// Case stages / etapas (S07 form + S30 settings)
+export { listStages, type CaseStage } from "./stages";
+
 // Pruebas + plazos (S12) — fecha límite always computed by lib/plazos.
 export { createPrueba, listPruebas, type CreatePruebaInput } from "./pruebas";
 

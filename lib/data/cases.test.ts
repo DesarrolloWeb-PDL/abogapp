@@ -296,6 +296,8 @@ describe("supabase driver", () => {
           jurisdiccion: "",
           juzgado: "",
           tipo: "Judicial",
+          etapa_id: null,
+          responsable: null,
           favorito: false,
           archivado: false,
           source: "manual",
@@ -304,7 +306,84 @@ describe("supabase driver", () => {
       ],
     });
 
+    // No etapa given → no case_stages lookup is made at all.
+    expect(calls.some((call) => call.table === "case_stages")).toBe(false);
+
     // The fake store never took the write — the supabase branch owns it.
     expect(getStore().cases).toHaveLength(seedCases.length);
+  });
+
+  it("createCase resolves the etapa name to its stage id and sends the responsable column", async () => {
+    queueMembership();
+    queueResponse("case_stages", { data: { id: "stage-2" }, error: null });
+    queueResponse("cases", {
+      data: { ...CASE_ROW, etapa: { name: "Trámite" }, responsable: "Marta Sosa" },
+      error: null,
+    });
+
+    const created = await createCase({
+      caratula: "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos",
+      etapa: "Trámite",
+      responsable: "  Marta Sosa  ",
+    });
+
+    expect(created.etapa).toBe("Trámite");
+    expect(created.responsable).toBe("Marta Sosa");
+
+    // The stage lookup is scoped to the current study and keyed by NAME —
+    // cases stores etapa_id (uuid FK), StudyCase.etapa is the display name.
+    const lookup = calls.find((call) => call.table === "case_stages");
+    expect(lookup?.steps).toContainEqual({ name: "eq", args: ["study_id", "study-9"] });
+    expect(lookup?.steps).toContainEqual({ name: "eq", args: ["name", "Trámite"] });
+
+    const write = calls.find((call) => call.table === "cases");
+    expect(write?.steps[0]).toEqual({
+      name: "insert",
+      args: [
+        {
+          study_id: "study-9",
+          caratula: "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos",
+          numero: "",
+          fuero: "",
+          jurisdiccion: "",
+          juzgado: "",
+          tipo: "Judicial",
+          etapa_id: "stage-2",
+          responsable: "Marta Sosa",
+          favorito: false,
+          archivado: false,
+          source: "manual",
+          created_by: "user-1",
+        },
+      ],
+    });
+  });
+
+  it("listCases prefers the responsable column and falls back to the creator profile", async () => {
+    queueResponse("cases", {
+      data: [
+        { ...CASE_ROW, id: "case-c", responsable: "Marta Sosa" },
+        {
+          ...CASE_ROW,
+          id: "case-d",
+          responsable: null,
+          created_by: { full_name: "Luis Duarte" },
+        },
+      ],
+      error: null,
+    });
+
+    const cases = await listCases();
+
+    // Old rows (created before the column existed) read their responsable
+    // from the creator's profile — same person the fake layer defaults to.
+    expect(cases.map((entry) => entry.responsable)).toEqual([
+      "Marta Sosa",
+      "Luis Duarte",
+    ]);
+
+    const read = calls.find((call) => call.table === "cases");
+    expect(String(read?.steps[0]?.args[0])).toContain("responsable");
+    expect(String(read?.steps[0]?.args[0])).toContain("etapa:case_stages(name)");
   });
 });

@@ -7,12 +7,25 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { useToast } from "@/components/ui/toast";
-import { DataLayerError, ERROR_COPY, createCase, getMyStudy } from "@/lib/data";
+import {
+  DataLayerError,
+  ERROR_COPY,
+  createCase,
+  getSession,
+  getMyStudy,
+  listStages,
+  type CaseStage,
+} from "@/lib/data";
+import type { StudyCase } from "@/lib/types";
+
+/** Tipo vocabularies come from the StudyCase union — never invented here. */
+const TIPO_OPTIONS: StudyCase["tipo"][] = ["Judicial", "Extrajudicial"];
 
 /**
  * Manual case creation form (S07): validates, persists through the data
- * layer and lands on the new case's detail. The jurisdiction field is
- * prefilled from the wizard's step-1 selection when there is one.
+ * layer and lands on the new case's detail. Prefills come from the study:
+ * jurisdiction (wizard step 1), the etapa options (case_stages rows) and
+ * the responsable (the signed-in user's full name).
  */
 export function NuevaExpedienteForm() {
   const router = useRouter();
@@ -21,19 +34,26 @@ export function NuevaExpedienteForm() {
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [jurisdiccion, setJurisdiccion] = useState("");
+  const [etapa, setEtapa] = useState("");
+  const [etapas, setEtapas] = useState<CaseStage[]>([]);
+  const [responsable, setResponsable] = useState("");
   const [prefillError, setPrefillError] = useState(false);
   // Bumped by "Reintentar" so the prefill effect runs again.
   const [reload, setReload] = useState(0);
 
-  // Prefill the jurisdiction from the study; a failed read must show an
-  // error with a retry instead of silently leaving the field empty.
+  // Prefill from the study: jurisdiction, etapa options and responsable
+  // default. A failed read must show an error with a retry instead of
+  // silently leaving the fields empty.
   useEffect(() => {
     let cancelled = false;
-    getMyStudy()
-      .then((study) => {
-        if (cancelled || !study) return;
-        const first = study.jurisdictions[0];
+    Promise.all([getMyStudy(), listStages(), getSession()])
+      .then(([study, stages, session]) => {
+        if (cancelled) return;
+        const first = study?.jurisdictions[0];
         if (first) setJurisdiccion(first);
+        setEtapas(stages);
+        // A retry must not clobber what the user already typed.
+        setResponsable((current) => current || session?.user.fullName || "");
       })
       .catch(() => {
         if (cancelled) return;
@@ -71,6 +91,12 @@ export function NuevaExpedienteForm() {
         fuero: String(data.get("fuero") ?? ""),
         jurisdiccion: String(data.get("jurisdiccion") ?? ""),
         juzgado: String(data.get("juzgado") ?? ""),
+        etapa: String(data.get("etapa") ?? ""),
+        tipo:
+          String(data.get("tipo")) === "Extrajudicial"
+            ? "Extrajudicial"
+            : "Judicial",
+        responsable: String(data.get("responsable") ?? ""),
       });
       toast("Expediente creado", { variant: "success" });
       router.push(`/expedientes/${created.id}`);
@@ -108,7 +134,7 @@ export function NuevaExpedienteForm() {
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3"
         >
           <p className="text-sm font-medium text-danger">
-            No pudimos cargar la jurisdicción de tu estudio.
+            No pudimos cargar los datos de tu estudio.
           </p>
           <Button variant="secondary" size="sm" onClick={retryPrefill}>
             Reintentar
@@ -146,6 +172,41 @@ export function NuevaExpedienteForm() {
           placeholder="Ciudad Autónoma de Buenos Aires"
           value={jurisdiccion}
           onChange={(event) => setJurisdiccion(event.target.value)}
+        />
+        <FormField
+          as="select"
+          label="Etapa"
+          name="etapa"
+          hint="Etapa procesal del expediente según tu estudio."
+          value={etapa}
+          onChange={(event) => setEtapa(event.target.value)}
+        >
+          <option value="">Sin etapa</option>
+          {etapas.map((stage) => (
+            <option key={stage.id} value={stage.name}>
+              {stage.name}
+            </option>
+          ))}
+        </FormField>
+        <FormField
+          as="select"
+          label="Tipo"
+          name="tipo"
+          defaultValue="Judicial"
+        >
+          {TIPO_OPTIONS.map((tipo) => (
+            <option key={tipo} value={tipo}>
+              {tipo}
+            </option>
+          ))}
+        </FormField>
+        <FormField
+          label="Responsable"
+          name="responsable"
+          placeholder="Nombre y apellido"
+          hint="Quién lleva el expediente. Se muestra en los filtros del listado."
+          value={responsable}
+          onChange={(event) => setResponsable(event.target.value)}
         />
 
         {formError && (

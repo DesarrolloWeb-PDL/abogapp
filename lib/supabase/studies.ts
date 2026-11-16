@@ -19,6 +19,8 @@ interface StudyRow {
   id: string;
   name: string;
   plan_key: string;
+  /** jsonb array of jurisdiction names; absent on pre-migration rows. */
+  jurisdictions?: string[] | null;
   created_at: string;
 }
 
@@ -29,10 +31,16 @@ export async function createStudySupabase(
   const user = await requireUser(supabase);
 
   const name = input.name.trim() || "Mi estudio";
+  // Same normalisation as the fake branch: trim and drop blanks, so both
+  // drivers store the identical array for the wizard's step-1 selection.
+  const jurisdictions = input.jurisdictions
+    .map((item) => item.trim())
+    .filter(Boolean);
+
   const { data: study, error } = await supabase
     .from("studies")
-    .insert({ name, plan_key: "trial", created_by: user.id })
-    .select("id, name, plan_key, created_at")
+    .insert({ name, plan_key: "trial", created_by: user.id, jurisdictions })
+    .select("id, name, plan_key, jurisdictions, created_at")
     .single();
   if (error || !study) {
     throw new DataLayerError("save_failed");
@@ -49,9 +57,6 @@ export async function createStudySupabase(
     throw new DataLayerError("save_failed");
   }
 
-  // TODO(schema gap): the wizard collects jurisdictions but `studies` has no
-  // such column in replica/schema.sql — reported in replica/backend.md;
-  // stored for real once the migration adds it.
   return mapStudy(study);
 }
 
@@ -65,7 +70,9 @@ export async function getMyStudySupabase(): Promise<Study | null> {
 
   const { data, error } = await supabase
     .from("memberships")
-    .select("study:studies(id, name, plan_key, created_at)")
+    .select(
+      "study:studies(id, name, plan_key, jurisdictions, created_at)",
+    )
     .eq("user_id", user.id)
     .eq("status", "active")
     .order("created_at", { ascending: false })
@@ -100,8 +107,10 @@ function mapStudy(row: StudyRow): Study {
     id: row.id,
     name: row.name,
     plan,
-    // See the schema-gap TODO in createStudySupabase.
-    jurisdictions: [],
+    // A row written before the jurisdictions column existed has no value;
+    // PostgREST always sends the jsonb array, so only a missing key means
+    // "unknown" — both collapse to the honest empty list.
+    jurisdictions: Array.isArray(row.jurisdictions) ? row.jurisdictions : [],
     createdAt: row.created_at,
   };
 }

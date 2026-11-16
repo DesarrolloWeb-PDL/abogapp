@@ -91,6 +91,11 @@ create table studies (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 1 and 160),
   logo_url text,
+  -- Wizard step-1 selection (S03): the picked jurisdiction names. jsonb (not
+  -- text[]) to match the schema's other list-shaped columns and round-trip
+  -- through PostgREST as a plain JS array — see migrations/20261115120000_form_gaps.sql.
+  jurisdictions jsonb not null default '[]'
+    check (jsonb_typeof(jurisdictions) = 'array'),
   plan_key text not null default 'trial' references plans (key) on delete restrict,
   storage_used_bytes bigint not null default 0 check (storage_used_bytes >= 0),
   trial_ends_at timestamptz not null default (now() + interval '14 days'),
@@ -213,6 +218,7 @@ $$;
 
 -- ----------------------------------------------------------------------------
 -- case_stages — "Etapas" settings; counts_as_active drives Inicio (S30).
+-- Default rows are created per study by init_study_defaults().
 -- ----------------------------------------------------------------------------
 create table case_stages (
   id uuid primary key default gen_random_uuid(),
@@ -301,6 +307,10 @@ create table cases (
   fuero text,
   tipo text,
   etapa_id uuid references case_stages (id) on delete set null,
+  -- S07 Responsable column/filter: free-text responsibility (not a profiles
+  -- FK). Null on rows created before this column existed — those read their
+  -- responsable from created_by's profile instead.
+  responsable text,
   jurisdiccion text,
   source text not null default 'manual'
     check (source in ('manual', 'portal')),
@@ -1372,7 +1382,7 @@ create index idx_job_executions_status on job_executions (job_name, status);
 
 -- ============================================================================
 -- STUDY BOOTSTRAP — called once right after sign-up / wizard completion:
--- owner role, membership, default task statuses.
+-- owner role, membership, default task statuses, default case stages.
 -- ============================================================================
 create or replace function public.init_study_defaults(
   p_study_id uuid,
@@ -1396,6 +1406,21 @@ begin
     (p_study_id, 'completada',     'Completada',     4, true),
     (p_study_id, 'cancelada',      'Cancelada',      5, true)
   on conflict (study_id, key) do nothing;
+
+  -- Default case stages (Etapas) so the etapa picker (S07) has rows from the
+  -- first expediente on. ASSUMPTION: the recon never evidences stage names
+  -- (S30 only shows the settings table); this five-step set is our own
+  -- product default, editable per study — same names as the backfill in
+  -- migrations/20261115120000_form_gaps.sql. Idempotent: a study that
+  -- already has them is left untouched.
+  insert into case_stages (study_id, name, position)
+  values
+    (p_study_id, 'Inicial',      1),
+    (p_study_id, 'Trámite',      2),
+    (p_study_id, 'Prueba',       3),
+    (p_study_id, 'Sentencia',    4),
+    (p_study_id, 'Ejecución',    5)
+  on conflict (study_id, name) do nothing;
 
   -- TODO(gap): default event categories (6 names / 11 colors) are not
   -- evidenced; seed here once replica-design confirms them.
