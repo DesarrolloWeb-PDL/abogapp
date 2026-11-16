@@ -48,6 +48,16 @@ export interface ParsedInbound {
   contactName?: string;
 }
 
+/**
+ * Meta sends the bare digits (`5491122334455`); `wa_contacts_phone_e164_check`
+ * stores E.164 with a leading `+`. Normalizing at the parser keeps every
+ * consumer (contact upsert, lookup, conversation) on the same value.
+ */
+export function toE164(raw: string): string {
+  const digits = raw.replace(/[^\d]/g, "");
+  return `+${digits}`;
+}
+
 /** Meta's webhook shape: entry[] → changes[] → value.messages[]. */
 export function parseInboundMessages(payload: unknown): ParsedInbound[] {
   if (typeof payload !== "object" || payload === null) return [];
@@ -72,7 +82,7 @@ export function parseInboundMessages(payload: unknown): ParsedInbound[] {
         const profile = record.profile as { name?: unknown } | undefined;
         parsed.push({
           eventKey: id,
-          phone: from,
+          phone: toE164(from),
           text,
           contactName:
             typeof profile?.name === "string" ? profile.name : undefined,
