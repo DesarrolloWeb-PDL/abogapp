@@ -5,8 +5,10 @@ import { ToastProvider } from "@/components/ui/toast";
 
 /**
  * Authenticated area: guard + app shell (sidebar / mobile bottom bar) +
- * toast host. The guard is client-side over the fake session today;
- * server-side session checks arrive with Supabase (M2/backend).
+ * toast host. The guard resolves the session through the data layer's
+ * driver switch (fake localStorage / Supabase SSR cookies); `proxy.ts`
+ * refreshes the session and redirects first, so server-side checks are in
+ * place for both drivers.
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -17,3 +19,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     </AuthGuard>
   );
 }
+
+// Opted out of Next 16 instant-navigation validation: this segment reads
+// session/runtime data at request time (migration path per docs
+// authentication-with-cache-components.md — remove route by route later).
+export const instant = false;

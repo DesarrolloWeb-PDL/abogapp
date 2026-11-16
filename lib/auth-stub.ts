@@ -1,9 +1,10 @@
 /**
- * Client-side session stub for M1.
+ * Demo session storage key for the FAKE data driver (M1).
  *
- * Real authentication lands in T4 (Supabase Auth). Until then the authed
- * routes read this localStorage flag so the guard, login and signup flows can
- * be exercised end to end.
+ * Real authentication (Supabase Auth) keeps its session in SSR cookies and
+ * never touches this module — see lib/data/auth.ts for the driver switch.
+ * The fake driver mirrors its session into a cookie of the same key so
+ * route handlers can gate on it (localStorage never reaches the server).
  */
 
 export const AUTH_STORAGE_KEY = "m1-demo-session";

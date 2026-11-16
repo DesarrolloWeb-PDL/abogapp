@@ -11,6 +11,7 @@
 // Auth (S01 / S02)
 export {
   getSession,
+  parseDemoSessionCookie,
   signIn,
   signOut,
   signUp,
@@ -21,6 +22,9 @@ export {
   type SignInInput,
   type SignUpInput,
 } from "./auth";
+
+// Driver switch: "supabase" when the project keys exist, "fake" otherwise.
+export { getDataDriver, isSupabaseConfigured, type DataDriver } from "./driver";
 
 // Studies (S03 wizard)
 export {

@@ -10,8 +10,12 @@ import { ERROR_COPY, signUp } from "@/lib/data";
 /**
  * Sign-up (S02): full name + email + password, no credit card, no Google
  * (those arrive with M4). Validation runs here for instant feedback and the
- * data layer repeats it server-side once Supabase lands — the client is
- * never trusted alone.
+ * data layer repeats it server-side (shared rules in lib/data/auth.ts) — the
+ * client is never trusted alone.
+ *
+ * With Supabase Auth + email verification, a successful sign-up that returns
+ * no session shows a "check your inbox" notice (role="status") instead of an
+ * error: the account exists, the confirmation link is what finishes it.
  */
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,6 +31,7 @@ export function SignupForm() {
   const router = useRouter();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -49,12 +54,19 @@ export function SignupForm() {
 
     setFieldErrors(errors);
     setFormError(null);
+    setNotice(null);
     if (Object.keys(errors).length > 0) return;
 
     setPending(true);
     try {
       const result = await signUp({ fullName, email, password });
       if (!result.ok) {
+        if (result.error === "confirmation_pending") {
+          // Account created: the verification email is the next step.
+          setNotice(ERROR_COPY[result.error]);
+          setPending(false);
+          return;
+        }
         setFormError(ERROR_COPY[result.error]);
         setPending(false);
         return;
@@ -96,6 +108,11 @@ export function SignupForm() {
         required
         error={fieldErrors.password}
       />
+      {notice && (
+        <p role="status" className="rounded-md border border-border bg-bg px-3 py-3 text-sm font-medium text-text">
+          {notice}
+        </p>
+      )}
       {formError && (
         <p role="alert" className="text-sm font-medium text-danger">
           {formError}

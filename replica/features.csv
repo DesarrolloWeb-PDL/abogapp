@@ -1,5 +1,5 @@
 feature,area,priority,original,clone,notes
-Email and password sign-up and login,auth,must,yes,yes,S01 and S02; no credit card required at sign-up | M1: implemented (S01/S02 pages + forms)
+Email and password sign-up and login,auth,must,yes,yes,S01 and S02; no credit card required at sign-up | M1: implemented (S01/S02 pages + forms) | M2/backend: Supabase Auth driver (DATA_DRIVER) with email verification + confirmation notice; demo credential hint renders only on the fake driver; proxy.ts refreshes the session (Next 16 middleware rename)
 Google sign-in and passkey login,auth,should,yes,no,S01 and S26; passkey flow evidenced in security docs
 Two-factor auth and backup codes,auth,should,yes,no,S26 Seguridad page; thin evidence (index lines only)
 Five-step onboarding wizard (jurisdictions / profile / studio),auth,must,yes,partial,S03; creates the studio right after sign-up | M1: steps 1-3 of 5 (jurisdicciones / perfil / estudio); steps 4-5 arrive in M2
@@ -67,5 +67,5 @@ Veredicta users network and stored data,data,should,yes,skip,their users and sto
 Court portals themselves (PJN / MEV and others),judicial-sync,should,yes,skip,third-party public systems; only our own connectors may touch them
 Sworn-lawyer declaration sign-up flow,auth,should,yes,skip,their legal attestation; validate lawyers our own way
 WhatsApp intake bot (Module A),whatsapp,must,no,partial,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1 (T8): GET handshake requires WHATSAPP_VERIFY_TOKEN (no hardcoded fallback), POST verifies X-Hub-Signature-256, stores each event exactly once and runs the local rule-based bot; Graph API delivery and the 24h window are pending (M3)
-WhatsApp conversation inbox,whatsapp,must,no,yes,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1 (T8): /bandeja lists conversations from GET /api/wa/conversations with status filters plus loading, error, empty and no-results states; own design (no reference screen)
+WhatsApp conversation inbox,whatsapp,must,no,yes,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M1 (T8): /bandeja lists conversations from GET /api/wa/conversations with status filters plus loading, error, empty and no-results states; own design (no reference screen) | M2/backend: GET requires a valid session (401 otherwise — tested); supabase driver reads through RLS and the webhook writes through the service role
 Appointment booking via WhatsApp,whatsapp,must,no,no,Veredicta has no WhatsApp module; MetaJuridico/Whaticket recon pending | M3

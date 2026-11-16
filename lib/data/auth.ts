@@ -1,16 +1,28 @@
 /**
- * Auth functions for the fake data layer (T3b).
+ * Auth functions — the driver switch facade.
  *
- * NOT real authentication: accounts live in the in-memory store and the
- * session is a signed-off JSON blob in localStorage under the same key the
- * auth guard already reads (`lib/auth-stub`). Signatures mirror what the
- * Supabase Auth swap will expose, so screens never change.
+ * Signatures here are the contract every screen already imports (S01/S02 +
+ * wizard); the implementation dispatches per `getDataDriver()`:
+ *  - `fake`    → `auth-fake.ts` (in-memory demo, no keys required);
+ *  - `supabase`→ `auth-supabase.ts` (Supabase Auth via the SSR browser client,
+ *    session cookies managed by @supabase/ssr — see lib/supabase/client.ts
+ *    for the httpOnly caveat).
+ *
+ * Shared validation runs BEFORE either driver, so a malformed input never
+ * reaches Supabase Auth (and the rules stay identical in both modes).
  */
 
-import { AUTH_STORAGE_KEY } from "@/lib/auth-stub";
-import type { User } from "@/lib/types";
+import { signInFake, signUpFake, getSessionFake, signOutFake, updateProfileFake, parseDemoSessionCookie } from "./auth-fake";
+import {
+  getSessionSupabase,
+  signInSupabase,
+  signOutSupabase,
+  signUpSupabase,
+  updateProfileSupabase,
+} from "./auth-supabase";
+import { getDataDriver } from "./driver";
 import { DataLayerError, type DataErrorCode } from "./errors";
-import { getStore, isoNow, nextId } from "./store";
+import type { User } from "@/lib/types";
 
 export interface Session {
   user: User;
@@ -41,70 +53,59 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const MIN_PASSWORD_LENGTH = 8;
 
-export async function signUp(input: SignUpInput): Promise<AuthOutcome> {
+/** First sign-up rule the input breaks, or null when it is acceptable. */
+export function validateSignUp(input: SignUpInput): DataErrorCode | null {
   const fullName = input.fullName.trim();
   const email = input.email.trim().toLowerCase();
 
-  if (!fullName || !email || !input.password) {
-    return { ok: false, error: "missing_fields" };
-  }
-  if (!EMAIL_PATTERN.test(email)) {
-    return { ok: false, error: "invalid_email" };
-  }
-  if (input.password.length < MIN_PASSWORD_LENGTH) {
-    return { ok: false, error: "weak_password" };
-  }
+  if (!fullName || !email || !input.password) return "missing_fields";
+  if (!EMAIL_PATTERN.test(email)) return "invalid_email";
+  if (input.password.length < MIN_PASSWORD_LENGTH) return "weak_password";
+  return null;
+}
 
-  const store = getStore();
-  const taken = store.users.some(
-    (entry) => entry.user.email.toLowerCase() === email,
-  );
-  if (taken) return { ok: false, error: "email_taken" };
+/** First sign-in rule the input breaks, or null when it is acceptable. */
+export function validateSignIn(input: SignInInput): DataErrorCode | null {
+  const email = input.email.trim().toLowerCase();
+  if (!email || !input.password) return "missing_fields";
+  return null;
+}
 
-  const user: User = { id: nextId("user"), fullName, email };
-  store.users.push({ user, password: input.password });
-
-  return { ok: true, session: openSession(user) };
+export async function signUp(input: SignUpInput): Promise<AuthOutcome> {
+  const invalid = validateSignUp(input);
+  if (invalid) return { ok: false, error: invalid };
+  return getDataDriver() === "supabase"
+    ? signUpSupabase(input)
+    : signUpFake(input);
 }
 
 export async function signIn(input: SignInInput): Promise<AuthOutcome> {
-  const email = input.email.trim().toLowerCase();
-  if (!email || !input.password) return { ok: false, error: "missing_fields" };
-
-  const store = getStore();
-  const record = store.users.find(
-    (entry) => entry.user.email.toLowerCase() === email,
-  );
-  if (!record || record.password !== input.password) {
-    return { ok: false, error: "invalid_credentials" };
-  }
-
-  return { ok: true, session: openSession(record.user) };
+  const invalid = validateSignIn(input);
+  if (invalid) return { ok: false, error: invalid };
+  return getDataDriver() === "supabase"
+    ? signInSupabase(input)
+    : signInFake(input);
 }
 
 export async function signOut(): Promise<void> {
-  const store = getStore();
-  store.session = null;
-  persistSession(null);
+  if (getDataDriver() === "supabase") {
+    await signOutSupabase();
+    return;
+  }
+  await signOutFake();
 }
 
 /**
- * Read the current session. localStorage is the source of truth in the
- * browser (so the guard's `endDemoSession()` clears it too); the store field
- * is the fallback under Node (tests, SSR-free data layer).
+ * Read the current session.
+ * Browser: the active driver's client (localStorage demo / Supabase cookies).
+ * Server: the fake driver falls back to its in-process store; the Supabase
+ * driver answers null on purpose — SERVER session reads belong to
+ * `lib/supabase/server` (routes and proxy), never to this browser-facing API.
  */
 export async function getSession(): Promise<Session | null> {
-  if (typeof window !== "undefined") {
-    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw) as Session;
-      return parsed && parsed.user ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-  return getStore().session;
+  return getDataDriver() === "supabase"
+    ? getSessionSupabase()
+    : getSessionFake();
 }
 
 /** Wizard step 2: keep the signed-in profile in sync with what the user typed. */
@@ -118,26 +119,9 @@ export async function updateProfile(input: {
   if (!fullName || !email) return { ok: false, error: "missing_fields" };
   if (!EMAIL_PATTERN.test(email)) return { ok: false, error: "invalid_email" };
 
-  const session = await getSession();
-  if (!session) return { ok: false, error: "not_signed_in" };
-
-  const store = getStore();
-  const duplicate = store.users.some(
-    (entry) =>
-      entry.user.id !== session.user.id &&
-      entry.user.email.toLowerCase() === email,
-  );
-  if (duplicate) return { ok: false, error: "email_taken" };
-
-  const updated: User = { ...session.user, fullName, email };
-  const record = store.users.find((entry) => entry.user.id === session.user.id);
-  if (record) record.user = updated;
-
-  const nextSession: Session = { ...session, user: updated };
-  store.session = nextSession;
-  persistSession(nextSession);
-
-  return { ok: true, user: updated };
+  return getDataDriver() === "supabase"
+    ? updateProfileSupabase({ fullName, email })
+    : updateProfileFake({ fullName, email });
 }
 
 /** Current session or a typed failure — shared by every study/case call. */
@@ -147,19 +131,6 @@ export async function requireSession(): Promise<Session> {
   return session;
 }
 
-function openSession(user: User): Session {
-  const session: Session = { user, startedAt: isoNow() };
-  const store = getStore();
-  store.session = session;
-  persistSession(session);
-  return session;
-}
-
-function persistSession(session: Session | null): void {
-  if (typeof window === "undefined") return;
-  if (session) {
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-  } else {
-    window.localStorage.removeItem(AUTH_STORAGE_KEY);
-  }
-}
+// The demo-cookie parser is fake-driver plumbing, re-exported here so route
+// handlers keep a single import surface (`@/lib/data`).
+export { parseDemoSessionCookie };

@@ -2,12 +2,20 @@
  * Study (studio) functions — POST /api/studies and GET /api/studies/me in
  * miniature. Creating a study also writes the owner's membership, mirroring
  * `init_study_defaults()` from replica/architecture.md.
+ *
+ * Driver split: the fake layer keeps its in-memory store; the supabase
+ * driver inserts the row under RLS (created_by = auth.uid()) and calls the
+ * `init_study_defaults` RPC, which creates the Dueño role, the owner's
+ * active membership and the default task statuses — the membership path the
+ * onboarding wizard depends on.
  */
 
 import type { Study } from "@/lib/types";
 import { getSession, requireSession } from "./auth";
 import { DataLayerError } from "./errors";
+import { getDataDriver } from "./driver";
 import { getStore, isoNow, nextId } from "./store";
+import { createStudySupabase, getMyStudySupabase } from "@/lib/supabase/studies";
 
 export interface CreateStudyInput {
   name: string;
@@ -16,6 +24,8 @@ export interface CreateStudyInput {
 
 /** Wizard step 3: create the studio and membership for the signed-in user. */
 export async function createStudy(input: CreateStudyInput): Promise<Study> {
+  if (getDataDriver() === "supabase") return createStudySupabase(input);
+
   const session = await requireSession();
   const store = getStore();
 
@@ -39,6 +49,8 @@ export async function createStudy(input: CreateStudyInput): Promise<Study> {
  * when onboarding has not finished yet.
  */
 export async function getMyStudy(): Promise<Study | null> {
+  if (getDataDriver() === "supabase") return getMyStudySupabase();
+
   const session = await getSession();
   if (!session) return null;
 

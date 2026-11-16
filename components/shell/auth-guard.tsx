@@ -1,23 +1,22 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { readDemoSession } from "@/lib/auth-stub";
+import { getSession } from "@/lib/data";
 
 /**
- * Client-side guard for the authed routes. It only reads the fake layer's
- * session flag today — real server-side verification arrives with Supabase
- * (M2/backend) and replaces this stub.
+ * Client-side guard for the authed routes. Reads the session through the
+ * data layer's driver switch: the fake demo checks its localStorage flag,
+ * the Supabase driver reads the SSR session cookies. Server-side, `proxy.ts`
+ * refreshes the session and redirects first — this guard is the second line
+ * and the only one active while the fake driver runs without keys.
  *
- * The session flag is an external store (localStorage), read with
- * useSyncExternalStore so the first client render can decide without a
- * setState-in-effect cascade. While the value is unknown (SSR / hydration)
- * it shows a skeleton — never a spinner — and a missing session redirects
- * to /login.
+ * While the session is unknown (first paint) it shows a skeleton — never a
+ * spinner — and a missing session redirects to /login.
  */
 
-const subscribe = () => () => {};
+type GuardStatus = "loading" | "authed" | "guest";
 
 function ShellSkeleton() {
   return (
@@ -39,15 +38,27 @@ function ShellSkeleton() {
 
 export function AuthGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const session = useSyncExternalStore(subscribe, readDemoSession, () => null);
+  const [status, setStatus] = useState<GuardStatus>("loading");
 
-  // Read the store fresh when the effect runs: React may run this effect from
-  // the hydration render (server snapshot = null) before the client snapshot
-  // lands, so a stale closure value must not decide the redirect.
   useEffect(() => {
-    if (readDemoSession() === null) router.replace("/login");
-  }, [router, session]);
+    let cancelled = false;
+    getSession()
+      .then((session) => {
+        if (!cancelled) setStatus(session ? "authed" : "guest");
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("guest");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  if (session === null) return <ShellSkeleton />;
+  // Redirect only from the effect: never during render.
+  useEffect(() => {
+    if (status === "guest") router.replace("/login");
+  }, [status, router]);
+
+  if (status !== "authed") return <ShellSkeleton />;
   return <>{children}</>;
 }

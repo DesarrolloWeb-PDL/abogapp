@@ -9,11 +9,15 @@ import { ERROR_COPY, signIn } from "@/lib/data";
 import { seedDemoPassword, seedUser } from "@/lib/seed";
 
 /**
- * Login (S01): email + password against the fake data layer. Wrong
- * credentials surface a Spanish error (role="alert"); success opens the
- * session the auth guard reads and lands on the expedientes list.
+ * Login (S01): email + password against the active data driver (fake demo
+ * or Supabase Auth). Wrong credentials surface a Spanish error
+ * (role="alert"); success opens the session the auth guard reads and lands
+ * on the expedientes list.
+ *
+ * `showDemoHint` comes from the server (login page): the seed credential
+ * pair is rendered ONLY on the fake driver — never with real auth.
  */
-export function LoginForm() {
+export function LoginForm({ showDemoHint }: { showDemoHint: boolean }) {
   const router = useRouter();
   const [fieldErrors, setFieldErrors] = useState<{
     email?: string;
@@ -80,11 +84,14 @@ export function LoginForm() {
         {pending ? "Ingresando…" : "Iniciar sesión"}
       </Button>
 
-      <p className="rounded-md border border-border bg-bg px-3 py-3 text-sm text-text-muted">
-        Cuenta de prueba del demo:{" "}
-        <span className="font-semibold text-text">{seedUser.email}</span> ·
-        contraseña <span className="font-semibold text-text">{seedDemoPassword}</span>
-      </p>
+      {showDemoHint && (
+        <p className="rounded-md border border-border bg-bg px-3 py-3 text-sm text-text-muted">
+          Cuenta de prueba del demo:{" "}
+          <span className="font-semibold text-text">{seedUser.email}</span> ·
+          contraseña{" "}
+          <span className="font-semibold text-text">{seedDemoPassword}</span>
+        </p>
+      )}
 
       <p className="text-center text-base text-text-muted">
         ¿Todavía no tenés cuenta?{" "}

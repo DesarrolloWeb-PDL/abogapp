@@ -1,14 +1,21 @@
 import type { NextRequest } from "next/server";
 import { processInboundPayload, verifyHubSignature } from "@/lib/data";
+import { getDataDriver } from "@/lib/data/driver";
+import { processInboundMeta } from "@/lib/supabase/meta-webhook";
 
 /**
  * Meta WhatsApp Business Cloud API webhook (Module A — assumption).
  *
  * T8: GET performs the verification handshake, POST authenticates the
- * delivery with X-Hub-Signature-256, stores each event exactly once (the
- * fake `wa_webhook_events` unique index) and runs the local rule-based bot.
+ * delivery with X-Hub-Signature-256 and stores each event exactly once.
  * The Graph API call that would deliver our reply to the client is not made
  * here — M1 makes no Meta calls at all; the reply lives in the inbox.
+ *
+ * Driver split (both paths idempotent on the event key):
+ *  - fake    → in-memory store via processInboundPayload;
+ *  - supabase→ service-role writes into wa_webhook_events / wa_* rows via
+ *    processInboundMeta (lib/supabase/meta-webhook.ts). The service-role key
+ *    is read here, server-side only — never exposed to a client bundle.
  *
  * No hardcoded fallbacks: both secrets come from the environment and the
  * route refuses to answer without them (see `.env.example`).
@@ -60,7 +67,10 @@ export async function POST(request: NextRequest) {
   }
 
   // Store + bot reply. Duplicates (Meta retries) are dropped inside.
-  const result = await processInboundPayload(payload);
+  const result =
+    getDataDriver() === "supabase"
+      ? await processInboundMeta(payload)
+      : await processInboundPayload(payload);
 
   // Meta retries until it sees a 200 — always acknowledge a valid delivery.
   return Response.json({

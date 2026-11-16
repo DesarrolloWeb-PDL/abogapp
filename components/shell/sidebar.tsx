@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, LogOut } from "lucide-react";
 import { MainNav } from "@/components/shell/main-nav";
 import { NotificationBell } from "@/components/shell/notification-bell";
-import { endDemoSession } from "@/lib/auth-stub";
+import { getMyStudy, getSession, signOut } from "@/lib/data";
 import { seedStudy, seedUser } from "@/lib/seed";
 
 /**
@@ -18,6 +18,10 @@ import { seedStudy, seedUser } from "@/lib/seed";
 export function Sidebar() {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [identity, setIdentity] = useState({
+    fullName: seedUser.fullName,
+    studyName: seedStudy.name,
+  });
 
   // Cmd/Ctrl+B toggles the sidebar (keyboard spec for block 1).
   useEffect(() => {
@@ -31,8 +35,30 @@ export function Sidebar() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  function signOut() {
-    endDemoSession();
+  // Real session identity (driver-switched); seed values are the demo
+  // fallback shown while the read resolves.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getSession(), getMyStudy()])
+      .then(([session, study]) => {
+        if (cancelled) return;
+        setIdentity({
+          fullName: session?.user.fullName || seedUser.fullName,
+          studyName: study?.name ?? "Tu estudio",
+        });
+      })
+      .catch(() => {
+        // Keep the demo fallback: the guard already verified the session.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSignOut() {
+    // Data-layer sign-out: clears the fake store/localStorage or the
+    // Supabase session cookies, depending on the driver.
+    await signOut();
     router.push("/login");
   }
 
@@ -82,7 +108,7 @@ export function Sidebar() {
             aria-hidden="true"
             className="flex size-9 shrink-0 items-center justify-center rounded-pill bg-accent-tint text-sm font-semibold text-accent"
           >
-            {seedUser.fullName
+            {identity.fullName
               .split(" ")
               .map((part) => part[0])
               .slice(0, 2)
@@ -91,16 +117,16 @@ export function Sidebar() {
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-text">
-                {seedUser.fullName}
+                {identity.fullName}
               </p>
-              <p className="truncate text-xs text-muted">{seedStudy.name}</p>
+              <p className="truncate text-xs text-muted">{identity.studyName}</p>
             </div>
           )}
         </div>
 
         <button
           type="button"
-          onClick={signOut}
+          onClick={handleSignOut}
           title={collapsed ? "Cerrar sesión" : undefined}
           aria-label={collapsed ? "Cerrar sesión" : undefined}
           className={[

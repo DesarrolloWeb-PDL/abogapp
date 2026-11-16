@@ -2,9 +2,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 /**
- * Vitest setup for the M1 slice (T1).
- * Node environment: the first tests cover the data layer / plazos math (T3),
- * which are pure functions. jsdom + React Testing Library come later if the
+ * Vitest setup (T1, extended by the backend phase).
+ * Node environment: the suite covers the data layer / plazos math (pure
+ * functions) plus route handlers with mocked sessions/clients — no live
+ * Supabase project. jsdom + React Testing Library come later if the
  * component tests need them (Next.js docs: 01-app/02-guides/testing/vitest.md).
  */
 export default defineConfig({
@@ -15,7 +16,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "components/**/*.test.{ts,tsx}"],
+    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "components/**/*.test.{ts,tsx}"],
     exclude: ["node_modules/**", ".next/**"],
   },
 });
