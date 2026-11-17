@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { listCases } from "@/lib/data";
 import { formatDate } from "@/lib/format";
+import { searchMatches } from "@/lib/search";
 import type { StudyCase } from "@/lib/types";
 
 /**
@@ -61,13 +62,14 @@ export function ExpedientesView() {
     [state],
   );
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return cases;
+    if (!query.trim()) return cases;
+    // BUG-003: accent-stripping + bounded typo tolerance (lib/search.ts)
+    // instead of a plain case-folded includes.
     return cases.filter((item) =>
-      [item.caratula, item.numero, item.juzgado, item.fuero]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
+      searchMatches(
+        query,
+        [item.caratula, item.numero, item.juzgado, item.fuero].join(" "),
+      ),
     );
   }, [cases, query]);
 
@@ -106,7 +108,9 @@ export function ExpedientesView() {
       sortable: true,
       sortValue: (row) => row.etapa,
       cell: (row) => (
-        <Badge tone={etapaTone[row.etapa] ?? "neutral"}>{row.etapa}</Badge>
+        <Badge tone={etapaTone[row.etapa] ?? "neutral"}>
+          {row.etapa || "Sin etapa"}
+        </Badge>
       ),
     },
     {

@@ -1,7 +1,6 @@
 import { test, expect, type Route } from "@playwright/test";
 import {
   SEED,
-  WAIVE_SIDEBAR_LOGO,
   expectNoAxeViolations,
   guardPage,
   tabUntil,
@@ -43,9 +42,27 @@ test.describe("F02 case list and detail", () => {
     expect(Number(match![1])).toBe(Number(match![2]));
     expect(Number(match![1])).toBeGreaterThanOrEqual(2);
 
+    // BUG-005: stage-less cases show the labelled "Sin etapa" chip — never
+    // an empty pill (the seeded cases have no case_stages link).
+    await expect(
+      page.getByRole("cell", { name: "Sin etapa" }).first(),
+    ).toBeVisible();
+
     await page.getByRole("link", { name: SEED.caseGomez }).click();
     await expect(
       page.getByRole("heading", { name: SEED.caseGomez }),
+    ).toBeVisible();
+    // BUG-005 (detail header) — same fallback as "Sin fuero" / "Sin número".
+    // Next 16 keeps the previous page mounted, hidden with display:none
+    // (Activity, see preserving-ui-state.md), so text queries filter to the
+    // visible chip of THIS screen instead of matching the hidden list copy.
+    await expect(
+      page.getByText("Sin etapa", { exact: true }).filter({ visible: true }),
+    ).toBeVisible();
+    // BUG-006: the "Última actividad" card falls back like its sibling card
+    // ("Información del expediente" prints "Responsable —").
+    await expect(
+      page.getByText("Responsable: —").filter({ visible: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Información del expediente" }),
@@ -57,9 +74,7 @@ test.describe("F02 case list and detail", () => {
     await expect(page.getByText(SEED.gomezPlazoBadge)).toBeVisible();
     await expect(page.getByRole("link", { name: "Resumen" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Pruebas" })).toBeVisible();
-    await expectNoAxeViolations(page, "/expedientes/[id] (F02-E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/expedientes/[id] (F02-E15)");
 
     // Back to the list for its own axe scan (scans run last so a
     // violation can never mask the functional assertions above).
@@ -68,9 +83,7 @@ test.describe("F02 case list and detail", () => {
       page.getByRole("heading", { name: "Expedientes", exact: true }),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: SEED.caseGomez })).toBeVisible();
-    await expectNoAxeViolations(page, "/expedientes (F02-E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/expedientes (F02-E15)");
     await guard.assertClean();
   });
 
@@ -270,9 +283,7 @@ test.describe("F02 case list and detail", () => {
     await expect(
       page.getByRole("heading", { name: SEED.caseGomez }),
     ).toBeVisible();
-    await expectNoAxeViolations(page, "detail via keyboard (F02-E14/E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "detail via keyboard (F02-E14/E15)");
     await guard.assertClean();
   });
 

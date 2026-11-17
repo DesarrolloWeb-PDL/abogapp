@@ -92,32 +92,13 @@ export function guardPage(page: Page, options: GuardOptions = {}) {
 
 /** Axe scan (wcag2a/2aa/21a/21aa) on the current screen — 0 violations.
  *
- * `waivers` lists KNOWN open bugs (replica/bugs.md) that are excluded by
- * rule id + element target until they are fixed; any other violation —
- * including a new one on the same screen — still fails the test.
+ * No waivers: every rule (including `label-content-name-mismatch`, BUG-001,
+ * fixed) is enforced on every scan; any violation fails the test.
  */
-export interface AxeWaiver {
-  /** axe rule id, e.g. `label-content-name-mismatch`. */
-  id: string;
-  /** Substring of the axe node target, e.g. `a[aria-label="Ir al inicio"]`. */
-  target: string;
-  /** Bug id in replica/bugs.md, kept in the code so the waiver is traceable. */
-  bug: string;
-}
-
-/** BUG-001 (replica/bugs.md): sidebar logo link shows "Tu estudio" but its
- *  accessible name is "Ir al inicio" (WCAG 2.5.3). Waived until fixed. */
-export const WAIVE_SIDEBAR_LOGO: AxeWaiver = {
-  id: "label-content-name-mismatch",
-  target: 'a[aria-label="Ir al inicio"]',
-  bug: "BUG-001",
-};
-
 export async function expectNoAxeViolations(
   page: Page,
   label: string,
-  waivers: AxeWaiver[] = [],
-) {
+): Promise<void> {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -125,11 +106,6 @@ export async function expectNoAxeViolations(
   for (const violation of results.violations) {
     for (const node of violation.nodes) {
       const target = node.target.join(" ");
-      const waived = waivers.some(
-        (waiver) =>
-          waiver.id === violation.id && target.includes(waiver.target),
-      );
-      if (waived) continue;
       summary.push(
         `${violation.id} (${violation.impact ?? "n/a"}) ${target}: ${violation.help}`,
       );

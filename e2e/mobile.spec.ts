@@ -1,7 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   SEED,
-  WAIVE_SIDEBAR_LOGO,
   expectNoAxeViolations,
   guardPage,
 } from "./helpers";
@@ -43,9 +42,7 @@ test.describe("mobile width 390", () => {
 
     await expect(page.getByRole("link", { name: SEED.caseGomez })).toBeVisible();
     await expectNoHorizontalScroll(page);
-    await expectNoAxeViolations(page, "/expedientes at 390", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/expedientes at 390");
     await guard.assertClean();
   });
 
@@ -62,9 +59,7 @@ test.describe("mobile width 390", () => {
       page.getByRole("heading", { name: "Notificaciones" }),
     ).toBeVisible();
     await expectNoHorizontalScroll(page);
-    await expectNoAxeViolations(page, "/notificaciones at 390", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/notificaciones at 390");
     await guard.assertClean();
   });
 
@@ -91,9 +86,7 @@ test.describe("mobile width 390", () => {
       page.getByRole("radiogroup", { name: "Unidad" }),
     ).toBeVisible();
     await expectNoHorizontalScroll(page);
-    await expectNoAxeViolations(page, "add-prueba form at 390", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "add-prueba form at 390");
     await guard.assertClean();
   });
 });

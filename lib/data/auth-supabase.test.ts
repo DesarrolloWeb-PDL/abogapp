@@ -6,28 +6,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * responses map onto the data layer's typed error codes.
  */
 
-const { signUpMock, signInMock, updateUserMock, getUserMock, upsertMock } =
+const { signUpMock, signInMock, updateUserMock, getUserMock, upsertMock, signOutMock } =
   vi.hoisted(() => ({
     signUpMock: vi.fn(),
     signInMock: vi.fn(),
     updateUserMock: vi.fn(),
     getUserMock: vi.fn(),
     upsertMock: vi.fn(),
+    signOutMock: vi.fn(),
   }));
 
-vi.mock("@/lib/supabase/client", () => ({
-  getBrowserClient: () => ({
-    auth: {
-      signUp: signUpMock,
-      signInWithPassword: signInMock,
-      updateUser: updateUserMock,
-      getUser: getUserMock,
-    },
-    from: () => ({ upsert: upsertMock }),
-  }),
-}));
+// Partial mock: the sign-out gate/drain helpers (BUG-002) are the REAL
+// implementations; only the browser client itself is stubbed, no network.
+vi.mock("@/lib/supabase/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/supabase/client")>();
+  return {
+    ...actual,
+    getBrowserClient: () => ({
+      auth: {
+        signUp: signUpMock,
+        signInWithPassword: signInMock,
+        updateUser: updateUserMock,
+        getUser: getUserMock,
+        signOut: signOutMock,
+      },
+      from: () => ({ upsert: upsertMock }),
+    }),
+  };
+});
 
-import { getSession, signIn, signUp, updateProfile } from "./auth";
+import { getSession, signIn, signOut, signUp, updateProfile } from "./auth";
 
 const VALID_INPUT = {
   fullName: "Camila Ferreyra",
@@ -37,11 +45,13 @@ const VALID_INPUT = {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   signUpMock.mockReset();
   signInMock.mockReset();
   updateUserMock.mockReset();
   getUserMock.mockReset();
   upsertMock.mockReset();
+  signOutMock.mockReset();
 });
 
 describe("signUp validation (both drivers)", () => {
@@ -154,6 +164,98 @@ describe("supabase driver", () => {
     expect(result.ok).toBe(true);
     expect(updateUserMock).toHaveBeenCalledWith({
       data: { full_name: VALID_INPUT.fullName },
+    });
+  });
+
+  describe("sign-out determinism (BUG-002)", () => {
+    it("signOut revokes through the browser client, even if the revoke fails", async () => {
+      signOutMock.mockResolvedValueOnce({ error: null });
+      await expect(signOut()).resolves.toBeUndefined();
+      expect(signOutMock).toHaveBeenCalledTimes(1);
+
+      // Best effort: a failed revoke must never reject the sign-out flow.
+      signOutMock.mockRejectedValueOnce(new Error("network down"));
+      await expect(signOut()).resolves.toBeUndefined();
+      expect(signOutMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("waits for in-flight auth requests to settle BEFORE revoking", async () => {
+      const client = await import("@/lib/supabase/client");
+
+      let release!: (value: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      const fetchSpy = vi.fn(() => pending);
+      vi.stubGlobal("fetch", fetchSpy);
+
+      // A session read already on the wire (the sidebar's getMyStudy →
+      // GET /auth/v1/user that used to race the revoke into a 403).
+      const inFlight = client.authFetch(
+        "https://demo.supabase.co/auth/v1/user",
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      let revoked = false;
+      signOutMock.mockImplementation(async () => {
+        revoked = true;
+        return { error: null };
+      });
+
+      const signingOut = signOut();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(revoked, "revoke must wait for the in-flight read").toBe(false);
+
+      release(new Response("{}", { status: 200 }));
+      await inFlight;
+      await signingOut;
+      expect(revoked, "revoke proceeds once the read settled").toBe(true);
+    });
+
+    it("answers auth reads locally while signing out — no request leaves the tab", async () => {
+      const client = await import("@/lib/supabase/client");
+
+      const fetchSpy = vi.fn(() =>
+        Promise.resolve(new Response("{}", { status: 200 })),
+      );
+      vi.stubGlobal("fetch", fetchSpy);
+
+      await client.startSignOut();
+      try {
+        const read = await client.authFetch(
+          "https://demo.supabase.co/auth/v1/user",
+        );
+        expect(read.status).toBe(401);
+        expect(fetchSpy, "gated read never hits the network").not.toHaveBeenCalled();
+
+        // The revoke itself is the one auth call still allowed out.
+        await client.authFetch(
+          "https://demo.supabase.co/auth/v1/logout?scope=global",
+          { method: "POST" },
+        );
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        client.endSignOut();
+      }
+
+      // Gate released: normal reads go to the network again.
+      await client.authFetch("https://demo.supabase.co/auth/v1/user");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("passes non-auth requests through untouched", async () => {
+      const client = await import("@/lib/supabase/client");
+
+      const fetchSpy = vi.fn(() =>
+        Promise.resolve(new Response("[]", { status: 200 })),
+      );
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const response = await client.authFetch(
+        "https://demo.supabase.co/rest/v1/cases?select=id",
+      );
+      expect(response.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

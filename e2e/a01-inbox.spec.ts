@@ -1,7 +1,6 @@
 import { test, expect, type Route } from "@playwright/test";
 import {
   SEED,
-  WAIVE_SIDEBAR_LOGO,
   expectNoAxeViolations,
   guardPage,
   tabUntil,
@@ -67,9 +66,7 @@ test.describe("A01 inbox", () => {
     await page.reload();
     await expect(page.getByText("Marina Duarte")).toBeVisible();
 
-    await expectNoAxeViolations(page, "/bandeja (WA02-E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/bandeja (WA02-E15)");
     await guard.assertClean();
   });
 

@@ -1,7 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import {
   SEED,
-  WAIVE_SIDEBAR_LOGO,
   expectNoAxeViolations,
   guardPage,
   tabUntil,
@@ -79,9 +78,7 @@ test.describe("F06 notifications page", () => {
     await page.reload();
     await expect(page.getByText(SEED.notificationTitle)).toBeVisible();
 
-    await expectNoAxeViolations(page, "/notificaciones (F06-E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/notificaciones (F06-E15)");
     await guard.assertClean();
   });
 

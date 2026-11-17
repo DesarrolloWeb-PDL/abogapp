@@ -10,7 +10,11 @@
  */
 
 import type { AuthError, User } from "@supabase/supabase-js";
-import { getBrowserClient } from "@/lib/supabase/client";
+import {
+  endSignOut,
+  getBrowserClient,
+  startSignOut,
+} from "@/lib/supabase/client";
 import type {
   AuthOutcome,
   ProfileOutcome,
@@ -54,10 +58,17 @@ export async function signInSupabase(input: SignInInput): Promise<AuthOutcome> {
 export async function signOutSupabase(): Promise<void> {
   // Local session state is cleared even if the network call fails — a stale
   // cookie must never survive a user-initiated sign-out.
+  //
+  // BUG-002: gate new auth calls (answered locally) and drain requests
+  // already in flight BEFORE the global revoke, so no session read can race
+  // the revocation into `403 on /auth/v1/user` in the console.
+  await startSignOut();
   try {
     await getBrowserClient().auth.signOut();
   } catch {
     // Best effort: the proxy re-validates on the next request anyway.
+  } finally {
+    endSignOut();
   }
 }
 

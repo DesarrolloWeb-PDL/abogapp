@@ -1,7 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import {
   SEED,
-  WAIVE_SIDEBAR_LOGO,
   addBusinessDays,
   appAlert,
   expectNoAxeViolations,
@@ -135,9 +134,7 @@ test.describe("F03 prueba with días-hábiles plazo", () => {
     await expect(
       page.getByRole("heading", { name: "Agregar prueba" }),
     ).toBeVisible();
-    await expectNoAxeViolations(page, "add-prueba form (F03-E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "add-prueba form (F03-E15)");
 
     await guard.assertClean();
   });

@@ -2,7 +2,6 @@ import { test, expect } from "@playwright/test";
 import {
   DEMO,
   SEED,
-  WAIVE_SIDEBAR_LOGO,
   appAlert,
   expectNoAxeViolations,
   guardPage,
@@ -46,9 +45,7 @@ test.describe("AU01 login and logout", () => {
       0,
     );
 
-    await expectNoAxeViolations(page, "/expedientes after login (AU01-E15)", [
-      WAIVE_SIDEBAR_LOGO,
-    ]);
+    await expectNoAxeViolations(page, "/expedientes after login (AU01-E15)");
     await guard.assertClean();
   });
 
@@ -109,12 +106,9 @@ test.describe("AU01 login and logout", () => {
   test("AU01-H2 logout returns to /login and locks the app", async ({
     page,
   }) => {
-    // BUG-002 (replica/bugs.md): a session read races the logout revocation
-    // and logs `403 on /auth/v1/user` in the console. Known + reported;
-    // ignored here so the suite stays deterministic until it is fixed.
-    const guard = guardPage(page, {
-      ignoreConsole: (text) => text.includes("status of 403"),
-    });
+    // BUG-002 is fixed: the console guard is NOT waived anymore, so any
+    // `403 on /auth/v1/user` racing the global revoke fails this test.
+    const guard = guardPage(page);
     await login(page);
     await page.getByRole("button", { name: "Cerrar sesión" }).click();
 

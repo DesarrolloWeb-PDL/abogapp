@@ -131,7 +131,7 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
         <h1 className="text-xl font-bold text-text">{record.caratula}</h1>
         <div className="flex flex-wrap gap-2">
           <Badge tone="accent">{record.tipo}</Badge>
-          <Badge tone="info">{record.etapa}</Badge>
+          <Badge tone="info">{record.etapa || "Sin etapa"}</Badge>
           <Badge tone="neutral">{record.fuero || "Sin fuero"}</Badge>
           <Badge tone="neutral">{record.numero || "Sin número"}</Badge>
         </div>
@@ -235,7 +235,9 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
                 {formatDateTime(record.lastActivityAt)}
               </p>
               <p className="mt-1 text-base text-text-muted">
-                Responsable: {record.responsable}
+                {/* Same fallback as the "Información del expediente" card:
+                    an empty responsable renders "—", never a dangling label. */}
+                Responsable: {record.responsable || "—"}
               </p>
             </CardBody>
           </Card>

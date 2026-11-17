@@ -45,11 +45,11 @@ Scope: every recon flow F01–F06 in `replica/recon.md`, plus Module A (WhatsApp
 
 | case | type | steps | expected | auto | result |
 | --- | --- | --- | --- | --- | --- |
-| F02-H1 | happy | login → Expedientes → click carátula "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos" | detail opens: heading = carátula, cards "Información del expediente", "Próximos plazos" (seeded plazo badge `Vence 16/11/2026`), "Última actividad"; tabs Resumen / Pruebas | auto `e2e/f02-expedientes.spec.ts` | PASS |
+| F02-H1 | happy | login → Expedientes → click carátula "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos" | detail opens: heading = carátula, cards "Información del expediente", "Próximos plazos" (seeded plazo badge `Vence 16/11/2026`), "Última actividad"; tabs Resumen / Pruebas; no empty chips (BUG-005 "Sin etapa", BUG-006 `Responsable: —` asserted) | auto `e2e/f02-expedientes.spec.ts` | PASS (re-run after BUG-005/BUG-006 fix, assertions added) |
 | F02-H2 | happy (alt) | detail → tab Actuaciones → row "Leer" → reader → suggestion "Corre algun plazo para mi?" | reader with document + assistant panel | not-built: Actuaciones tab is T6/M2 and needs a synced case; no sync in M1 (build-log S08 missing) | NOT-BUILT |
 | F02-E1 | edge: empty input | search "zzzzzz" in the list | "No encontramos coincidencias con tu búsqueda" + "Limpiar búsqueda" restores rows | auto `f02-expedientes.spec.ts` | PASS |
 | F02-E2 | edge: very long input | search string of 1000 chars | empty state renders, no crash, no console error | auto `f02-expedientes.spec.ts` | PASS |
-| F02-E3 | edge: accents/emoji | type "gomez" (no accent); then "🚀" | must-row "accent and typo tolerant search": unaccented query finds "Gómez…"; emoji → empty state, no crash | auto `f02-expedientes.spec.ts` | FAIL (BUG-003) |
+| F02-E3 | edge: accents/emoji | type "gomez" (no accent); then "🚀" | must-row "accent and typo tolerant search": unaccented query finds "Gómez…"; emoji → empty state, no crash | auto `f02-expedientes.spec.ts` | PASS (BUG-003 fixed, re-run — test unchanged) |
 | F02-E4 | edge: two tabs at once | list open in 2 tabs, open detail in tab A | tab B unaffected; both render | auto `f02-expedientes.spec.ts` | PASS |
 | F02-E5 | edge: double click on submit | — | n/a: read-only flow, no submit | n/a | N/A |
 | F02-E6 | edge: back mid-flow | detail → browser Back | list re-rendered with data | auto `f02-expedientes.spec.ts` | PASS |
@@ -61,7 +61,7 @@ Scope: every recon flow F01–F06 in `replica/recon.md`, plus Module A (WhatsApp
 | F02-E12 | edge: time zones / DST | run with TZ `America/Argentina/Buenos_Aires`; seeded plazo badge | `Vence 16/11/2026` with no off-by-one; AR has no DST, date must not shift | auto `f02-expedientes.spec.ts` | PASS |
 | F02-E13 | edge: mobile 390 | open list at 390×844 | bottom bar (Expedientes/Bandeja/Avisos) visible, sidebar hidden, no horizontal scroll | auto `e2e/mobile.spec.ts` | PASS |
 | F02-E14 | edge: keyboard only | Tab to first carátula → Enter; Tab to tabs → Enter | detail opens / tab switches; focus ring visible | auto `f02-expedientes.spec.ts` | PASS |
-| F02-E15 | edge: screen-reader labels | axe scan of list + detail | 0 violations; `nav` landmarks, table caption "Expedientes del estudio" | auto `f02-expedientes.spec.ts` | PASS |
+| F02-E15 | edge: screen-reader labels | axe scan of list + detail | 0 violations; `nav` landmarks, table caption "Expedientes del estudio" | auto `f02-expedientes.spec.ts` | PASS (BUG-001 fixed — waiver removed, unwaived scan) |
 | F02-N1 | negative: wrong password | — | n/a: covered by AU01-N1 | n/a | N/A |
 | F02-N2 | negative: permission denied | second user requests study-1 case by id | RLS returns no row → missing state, no data leak | manual (same second-user setup as F02-E11) | MANUAL (pending) |
 | F02-N3 | negative: deleted record | open `/expedientes/<unknown-id>` | "No encontramos este expediente. Puede que se haya eliminado." + "Volver a expedientes"; delete UI itself is M2 (row menu) | auto `f02-expedientes.spec.ts` | PASS |
@@ -237,8 +237,8 @@ Bot flows 2–9 of `replica/whatsapp-bot.md` (qualification, case creation, FAQ,
 
 | case | type | steps | expected | auto | result |
 | --- | --- | --- | --- | --- | --- |
-| AU01-H1 | happy | /login → "Correo electrónico" = `prueba.abogapp@gmail.com`, "Contraseña" = `demo-estudio-2026` → "Iniciar sesión" | lands on /expedientes with seeded content; sidebar shows study "Estudio Beltrán & Asociados" | auto `e2e/auth.spec.ts` | PASS |
-| AU01-H2 | happy (logout) | sidebar "Cerrar sesión" | back on /login; /expedientes now redirects to /login | auto `auth.spec.ts` | PASS |
+| AU01-H1 | happy | /login → "Correo electrónico" = `prueba.abogapp@gmail.com`, "Contraseña" = `demo-estudio-2026` → "Iniciar sesión" | lands on /expedientes with seeded content; sidebar shows study "Estudio Beltrán & Asociados" | auto `e2e/auth.spec.ts` | PASS (re-run: axe scan is the BUG-001 RED/GREEN enforcement) |
+| AU01-H2 | happy (logout) | sidebar "Cerrar sesión" | back on /login; /expedientes now redirects to /login; **console stays clean (no `403 on /auth/v1/user` — BUG-002 guard unwaived)** | auto `auth.spec.ts` | PASS (BUG-002 fixed, re-run) |
 | AU01-N1 | negative: wrong password | correct email + wrong password | role=alert "El correo y la contraseña no coinciden. Revisalos e intentá otra vez."; stays on /login | auto `auth.spec.ts` | PASS |
 | AU01-N2 | negative: empty fields | submit both fields empty | field errors "Ingresá tu correo electrónico." / "Ingresá tu contraseña."; no network call | auto `auth.spec.ts` | PASS |
 | AU01-N3 | negative: invalid email | "notanemail" + password | typed credentials error (no format crash), no session | auto `auth.spec.ts` | PASS |
@@ -310,9 +310,9 @@ Items map to plan cases marked **manual** above.
    *Why manual:* needs deployment + Meta app config (M3 scope); local fixtures
    only prove signature, idempotency and the bot rules.
 5. **Visual pass at 1440 / 768 / 390 px** — eyeball every screen for layout
-   breaks, overflow, empty chips (e.g. the seeded cases render an empty Etapa
-   chip — see bugs.md), and save screenshots into `replica/clone-screens/`
-   (input for `/replica-diff`).
+   breaks, overflow, empty chips (the seeded stage-less cases used to render
+   an empty Etapa chip — fixed as BUG-005, verify the "Sin etapa" fallback),
+   and save screenshots into `replica/clone-screens/` (input for `/replica-diff`).
 6. **Full screen-reader pass (beyond axe)** — NVDA or VoiceOver: list row
    counts, loading announcements (the /bandeja loading skeleton is currently
    NOT announced — recorded in bugs.md), bell unread count, form error
@@ -337,15 +337,15 @@ Items map to plan cases marked **manual** above.
 
 ---
 
-## Summary (final — run of 2026-11-16)
+## Summary (re-run 2026-11-17 — after the BUG-001/002/003/005/006 batch)
 
-Final verification run: `npx playwright test` → **56 passed / 1 failed / 1 skipped** (58 tests, 1 worker, retries=1).
-The single failure is the reproduced bug **BUG-003** (`e2e/f02-expedientes.spec.ts` F02-E3), kept red on purpose; the skip is AU02-H1 (Supabase Auth email rate limit, per plan).
+Final verification run: `npx playwright test` → **58 passed / 0 failed / 1 skipped** (59 tests, 1 worker, retries=1).
+Zero failures: **BUG-003 is fixed** — `e2e/f02-expedientes.spec.ts` F02-E3 flipped green with the test unchanged; the skip is AU02-H1 (Supabase Auth email rate limit, per plan). The previous single failure (F02-E3, kept red on purpose) and both known-issue waivers (`WAIVE_SIDEBAR_LOGO` / the AU01-H2 403 guard) are gone.
 
 | flow | pass | fail | skip | manual | not-built | n/a | ref |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F01 (PJN connect) | 0 | 0 | 0 | 1 | 18 | 0 | 0 |
-| F02 (list + detail) | 14 | 1 (BUG-003) | 0 | 2 | 1 | 2 | 0 |
+| F02 (list + detail) | 15 | 0 | 0 | 2 | 1 | 2 | 0 |
 | F03 (prueba + plazo) | 16 | 0 | 0 | 2 | 2 | 0 | 0 |
 | F04 (tasks) | 0 | 0 | 0 | 1 | 19 | 0 | 0 |
 | F05 (AI draft) | 0 | 0 | 0 | 0 | 19 | 0 | 0 |
@@ -356,14 +356,14 @@ The single failure is the reproduced bug **BUG-003** (`e2e/f02-expedientes.spec.
 | AU01 (login/logout) | 9 | 0 | 0 | 0 | 0 | 0 | 1 |
 | AU02 (sign-up) | 5 | 0 | 1 | 2 | 0 | 1 | 0 |
 | AU03 (onboarding) | 0 | 0 | 0 | 5 | 1 | 0 | 1 |
-| **total** | **95** | **1** | **1** | **19** | **61** | **10** | **3** |
+| **total** | **96** | **0** | **1** | **19** | **61** | **10** | **3** |
 
-**Cases: 190 numbered rows — 97 automated (95 pass / 1 fail = BUG-003 / 1 skip = rate limit), 19 manual, 61 not-built (M2+), 10 n/a, 3 cross-references.**
+**Cases: 190 numbered rows — 97 automated (96 pass / 0 fail / 1 skip = rate limit), 19 manual, 61 not-built (M2+), 10 n/a, 3 cross-references.**
 
 Notes on the run environment:
 
 - The suite runs against the live local dev server (no `webServer` block), real Supabase project, seeded study.
 - Project order `guest → setup → chromium` is mandatory: AU01-H2's global sign-out revokes every demo-user session, so the storageState must be minted AFTER the guest logout tests (documented in `playwright.config.ts`).
-- Guards: console errors + uncaught page errors + any 5xx fail a test; axe (wcag2a/2aa/21a/21aa) runs on every main screen with the single known-issue waiver `WAIVE_SIDEBAR_LOGO` (BUG-001, replica/bugs.md) — any other violation still fails.
+- Guards: console errors + uncaught page errors + any 5xx fail a test; axe (wcag2a/2aa/21a/21aa) runs on every main screen with **no waivers** — BUG-001 is fixed and `WAIVE_SIDEBAR_LOGO` (plus the AU01-H2 `403` console guard) was removed, so every violation fails the test.
 - Expected 4xx from deliberate negative tests (wrong password, invalid plazo, cleared-session reads) are ignored **only** in those tests, with the reason in the spec.
 - Test data: cases/pruebas/notifications created by the suite are cleaned from the DB after the run (seed restored); WhatsApp fixture threads (phones +5491155550901/…902) persist on purpose and accumulate messages/webhook events per run.

@@ -78,7 +78,10 @@ export function Sidebar() {
       >
         <Link
           href="/expedientes"
-          aria-label="Ir al inicio"
+          // WCAG 2.5.3 (BUG-001): expanded, the visible "Tu estudio" already
+          // names the link, so an overriding aria-label would hide it from
+          // voice control. Only the icon-only collapsed state needs one.
+          aria-label={collapsed ? "Ir al inicio" : undefined}
           className="flex items-center gap-2 rounded-md px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <span

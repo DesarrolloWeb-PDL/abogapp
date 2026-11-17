@@ -31,9 +31,13 @@ failureSummary: Text inside the element is not included in the accessible name
 ```
 
 Voice-control users cannot activate the link by saying its visible label ("Tu estudio"); the accessible name hides it behind "Ir al inicio" (WCAG 2.5.3, level A).
-Evidence: axe output captured in this session (probe run against `/expedientes` after login); reproduced on every authed axe scan — `e2e/auth.spec.ts` (AU01-E15), `e2e/f02-expedientes.spec.ts` (F02-E15), `e2e/f03-prueba.spec.ts`, `e2e/f06-notifications.spec.ts`, `e2e/a01-inbox.spec.ts`, `e2e/mobile.spec.ts`. **Waived in `e2e/helpers.ts` (`WAIVE_SIDEBAR_LOGO`, references this bug id) so the suite stays usable; remove the waiver when fixing.**
+Evidence: axe output captured in this session (probe run against `/expedientes` after login); reproduced on every authed axe scan — `e2e/auth.spec.ts` (AU01-E15), `e2e/f02-expedientes.spec.ts` (F02-E15), `e2e/f03-prueba.spec.ts`, `e2e/f06-notifications.spec.ts`, `e2e/a01-inbox.spec.ts`, `e2e/mobile.spec.ts`.
 Suspected cause: the link sets `aria-label="Ir al inicio"` (sidebar) / `"Ir al inicio"` (mobile header), which overrides the visible brand text instead of appending it (e.g. `aria-label="Ir al inicio — Tu estudio"` or dropping the label).
-Status: open
+Status: **fixed** (commit pending) — accessible name + waiver removed:
+
+1. `components/shell/sidebar.tsx`: the logo link sets `aria-label` **only while collapsed** (icon-only state, where it is still needed for the link name). Expanded, the label is gone: the visible "Tu estudio" IS the accessible name (WCAG 2.5.3 — name contains the visible text). Note: axe's `label-content-name-mismatch` only evaluates elements carrying `aria-label`/`aria-labelledby` (verified in axe-core `labelContentNameMismatchMatches`), so keeping a label while expanded would always fail once the visible text differs.
+2. Waiver **removed**: `WAIVE_SIDEBAR_LOGO` deleted from `e2e/helpers.ts` (with its `AxeWaiver` machinery — `expectNoAxeViolations` now enforces every rule) and from every call site: `auth.spec.ts`, `f02-expedientes.spec.ts` (×3), `f03-prueba.spec.ts`, `f06-notifications.spec.ts`, `a01-inbox.spec.ts`, `mobile.spec.ts` (×3).
+3. Tests (RED observed first, kept): `e2e/auth.spec.ts` AU01-H1 failed with `label-content-name-mismatch (serious) a[aria-label="Ir al inicio"]` after the waiver removal and before the component fix; GREEN after. Every other axe scan in the suite now runs unwaived.
 
 ### BUG-002: Console error `403 on /auth/v1/user` right after "Cerrar sesión"
 
@@ -57,9 +61,17 @@ console error: Failed to load resource: the server responded with a status of 40
 
 CDP initiator stack: `auth-js _useSession → _request → _handleRequest → GET /auth/v1/user` — a session validation racing the logout revocation (the earlier concurrent read still carries the soon-to-be-revoked access token).
 Reproduced: 2/2 Playwright attempts + 2/2 manual CDP probes (race: occasionally only the 200 twin arrives).
-Evidence: `e2e/auth.spec.ts` AU01-H2 guard (waived with this bug id until fixed), CDP `Network.requestWillBeSent`/`responseReceived` trace captured in session.
+Evidence: `e2e/auth.spec.ts` AU01-H2 guard (waived with this bug id until fixed — waiver removed with this fix), CDP `Network.requestWillBeSent`/`responseReceived` trace captured in session.
 Suspected cause: `signOut()` (lib/data/auth-supabase.ts) runs while another session reader (`getSession()` in the shell/guard path) is in flight; auth-js validates the old token against GoTrue after the global logout invalidated it.
-Status: open
+Status: **fixed** (commit pending) — root cause + deterministic sign-out:
+
+1. **Root cause (captured with a CDP probe)**: the racy `GET /auth/v1/user` is the shell's mount-time identity read — `Sidebar` runs `Promise.all([getSession(), getMyStudy()])`, and `getMyStudy` → `requireUser` → `supabase.auth.getUser()` hits the network (twice in dev under React StrictMode). Logging out quickly after landing on `/expedientes` (Playwright always; a fast human often) puts those requests on the wire while `POST /auth/v1/logout?scope=global` revokes the session; a response landing after the revoke is the console `403`. `getSession()` itself never hits the network.
+2. `lib/supabase/client.ts`: the browser client now installs `authFetch` as `global.fetch` — it counts in-flight `/auth/v1/` requests, and from `startSignOut()` until `endSignOut()` it answers any NEW auth call **locally** with a synthetic 401 (the auth lib turns it into its typed "not signed in" error; nothing leaves the tab, so nothing can log a 403). Only `POST /auth/v1/logout` is allowed through while gated.
+3. `lib/data/auth-supabase.ts` `signOutSupabase`: `await startSignOut()` (gate ON + bounded 5 s drain of auth requests already in flight → they still carry the valid token and answer 200) → `auth.signOut()` (the revoke) → `endSignOut()` in `finally`. No request can be in flight when the revoke lands, and none can start with the revoked token.
+4. Waiver removed: `AU01-H2` in `e2e/auth.spec.ts` no longer ignores `status of 403`.
+5. Tests (RED observed first, kept):
+   - `e2e/auth.spec.ts` → AU01-H2 failed with `console error: Failed to load resource: the server responded with a status of 403 ()` after the waiver removal and before the fix; GREEN after.
+   - `lib/data/auth-supabase.test.ts` → `sign-out determinism (BUG-002)`: revoke waits for the in-flight read (RED first: `authFetch`/`startSignOut` did not exist), local-401 gate, non-auth passthrough, revoke best-effort.
 
 ### BUG-003: Expedientes search is not accent- or typo-tolerant (must-row feature)
 
@@ -77,7 +89,15 @@ Expected: both queries find "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pes
 Actual: neither query matches; the list shows the no-results state ("No encontramos coincidencias con tu búsqueda"). The filter is a plain case-folded `String.includes` over carátula/numero/juzgado/fuero, so `gómez` ≠ `gomez` and `gomezz` matches nothing. Typing the exact accented spelling works (that is the workaround).
 Evidence: failing test `e2e/f02-expedientes.spec.ts` → `F02-E3 accent/typo tolerant search + emoji query` (56 passed / 1 failed / 1 skipped final run; this is the only failure).
 Suspected cause: `expedientes-view.tsx` client-side filter uses `.toLowerCase().includes(...)` with no unaccent/fuzzy step (the build-log only lists filters/favorites/archive as M2 gaps, so this must-row part is treated as shipped scope).
-Status: open
+Status: **fixed** (commit pending) — reusable helper + wiring:
+
+1. **`lib/search.ts`** (new): `foldForSearch` (NFD → strip combining marks → lowercase → trim/collapse whitespace: `"Gómez"` → `"gomez"`, emoji untouched) + bounded `levenshtein` (≤ `maxDistance`, by code point, bails on length gap / whole DP row above the bound) + `searchMatches(query, haystack)`:
+   - exact/substring first, on the folded strings — so `gomez`, `GOMEZ` and `gómez` all match "Gómez…", and punctuation queries like `90.111` keep working;
+   - then typo tolerance: Levenshtein ≤ 2 between the **whole query / its last token** and any haystack token, only for inputs ≥ 4 chars — `gomezz` finds "Gómez" without ever turning the query into an OR over every token (`civil 4444` stays a miss).
+2. **Wiring**: `app/(app)/expedientes/expedientes-view.tsx` filters `[caratula, numero, juzgado, fuero].join(" ")` through `searchMatches` instead of case-folded `includes`.
+3. Tests (RED observed first, kept):
+   - `lib/search.test.ts` (new, 19 tests): naive-implementation RED first (accent + typo + emoji-in-haystack cases failed), GREEN after;
+   - `e2e/f02-expedientes.spec.ts` → F02-E3 (the previously failing test) flipped **GREEN unchanged** — not weakened.
 
 ### BUG-004: One plazo with an out-of-range fecha breaks the whole case detail ("No pudimos cargar el expediente.")
 
@@ -123,7 +143,12 @@ Expected: no stage → no chip, or a labelled fallback like the existing "Sin fu
 Actual: both seeded cases render an **empty coloured pill** — detail header shows `Judicial | (empty pill) | Civil y Comercial | 90.111/2026`, and the list "Etapa" column shows empty pills for every row. DOM probe: header badge texts `["E","Tu estudio","Judicial","","Civil y Comercial","90.111/2026"]` (one empty `rounded-pill`).
 Evidence: screenshots above; DOM probe output in session. The same render path is what F02-H1 asserts around.
 Suspected cause: `mapCase` maps a missing `etapa_id` to `""` and both views render `<Badge>{record.etapa}</Badge>` without the `|| "Sin etapa"` fallback they already apply to fuero/numero.
-Status: open
+Status: **fixed** (commit pending) — `|| "Sin etapa"` added at both render sites, matching the sibling fallback pattern: list "Etapa" cell (`expedientes-view.tsx`) and detail header badge (`case-detail-view.tsx`, alongside `Sin fuero` / `Sin número`).
+
+Tests (RED observed first, kept) in `e2e/f02-expedientes.spec.ts` F02-H1:
+1. RED `getByRole("cell", { name: "Sin etapa" })` (list) → fixed list cell → GREEN;
+2. RED `getByText("Sin etapa", { exact: true })` (detail header) → fixed header badge → GREEN.
+Note: the detail assertions filter `.filter({ visible: true })` because Next 16 keeps the previous page in the DOM hidden with `display:none` (React `<Activity>`, `preserving-ui-state.md` — documented as affecting Playwright), so the hidden copy of the list also contains "Sin etapa" text.
 
 ### BUG-006: "Responsable:" renders with an empty value on the case detail
 
@@ -139,7 +164,9 @@ Expected: a labelled value ("Sin responsable", "—", or the fallback name) like
 Actual: the "Última actividad" card prints `Responsable:` followed by **nothing** (screenshot: "13/11/2026, 07:51 p. m." then an empty "Responsable:" line). Triggered because the demo profile has `full_name = ""` and `cases.responsable` is null — but the render has no fallback, unlike the sibling card.
 Evidence: screenshot above (detail header/cards).
 Suspected cause: `case-detail-view.tsx` `Responsable: {record.responsable}` without `|| "—"`.
-Status: open
+Status: **fixed** (commit pending) — fallback chosen: **the em-dash of the sibling card**, not the profile full name and not hiding the line, because the "Información del expediente" card renders empty values as `value || "—"` and this bug's expectation is that consistency ("like the sibling card"). `case-detail-view.tsx` now prints `Responsable: {record.responsable || "—"}`.
+
+Test (RED observed first, kept) in `e2e/f02-expedientes.spec.ts` F02-H1: `getByText("Responsable: —")` failed while the card printed a dangling `Responsable:` → GREEN after the fix.
 
 ---
 
