@@ -83,13 +83,14 @@ Scope: every recon flow F01–F06 in `replica/recon.md`, plus Module A (WhatsApp
 | F03-E9 | edge: offline | block REST → submit | typed error toast, no row; unblock → retry succeeds | auto `f03-prueba.spec.ts` | PASS |
 | F03-E10 | edge: expired session | clear cookies → submit | never a silent success: typed error or redirect to /login, no row | auto `f03-prueba.spec.ts` | PASS |
 | F03-E11 | edge: second user invisible | second user opens the created case id | no row under RLS | manual (second confirmed user needed) | MANUAL (pending) |
-| F03-E12 | edge: time zones / DST | whole case runs with TZ `America/Argentina/Buenos_Aires`; compare UI badge vs `plazos.fecha_limite` from REST + independent weekday computation | UI date == DB date == 30/11/2026 (a business day); AR has no DST so no shift | auto `f03-prueba.spec.ts` | PASS |
+| F03-E12 | edge: time zones / DST | whole case runs with TZ `America/Argentina/Buenos_Aires`; compare UI badge vs `plazos.fecha_limite` from REST + independent weekday computation | UI date == DB date == 30/11/2026 (a business day); AR has no DST so no shift | auto `f03-prueba.spec.ts` | PASS (re-run after BUG-004 fix) |
 | F03-E13 | edge: mobile 390 | open "Agregar prueba" at 390×844 | fields stack, radiogroup usable, no horizontal scroll | auto `e2e/mobile.spec.ts` | PASS |
 | F03-E14 | edge: keyboard only | fill the whole form with Tab/arrows/Enter only | radio group reachable with arrow keys, Enter submits | auto `f03-prueba.spec.ts` | PASS |
 | F03-E15 | edge: screen-reader labels | axe scan of the add-prueba form | 0 violations; radiogroup labelled "Unidad", fields labelled | auto `f03-prueba.spec.ts` | PASS |
 | F03-N1 | negative: invalid plazo | Cantidad 6000 (engine guard 1..5000) | typed toast "La cantidad del plazo tiene que estar entre 1 y 5000.", no row | auto `f03-prueba.spec.ts` | PASS |
 | F03-N2 | negative: permission denied | second user posts a prueba for study-1 case | RLS rejects, typed error, no row | manual (second confirmed user needed) | MANUAL (pending) |
 | F03-N3 | negative: deleted record | submit against a deleted/unknown case id | typed error, no orphan row | not-built: delete UI is M2 (row menu); unknown-id state covered by F02-N3 | NOT-BUILT |
+| F03-N4 | negative: corrupt DB row (BUG-004 regression) | create a case → seed a prueba + plazo via REST with `fecha_efectiva 61116-02-02` (the trigger writes `fecha_limite 61116-02-10T02:59:59+00:00`) → open `/expedientes/<id>` → clean the rows up | detail renders (carátula heading, plazo shows the "Fecha pendiente" fallback, Pruebas tab readable); never "No pudimos cargar el expediente."; no out-of-range row left behind | auto `f03-prueba.spec.ts` (F03-N4) | PASS (BUG-004 fixed) |
 
 ## F04 — Lawyer assigns a task (S16)
 
@@ -144,7 +145,7 @@ Scope: every recon flow F01–F06 in `replica/recon.md`, plus Module A (WhatsApp
 
 | case | type | steps | expected | auto | result |
 | --- | --- | --- | --- | --- | --- |
-| F06-H1 | happy | bell ("Notificaciones…") → /notificaciones → click the seeded notification → back | list renders seeded rows; click navigates to its `deep_link` and marks it read; unread line "Tenés N notificaciones sin leer." while unread > 0 | auto `e2e/f06-notifications.spec.ts` | PASS |
+| F06-H1 | happy | bell ("Notificaciones…") → /notificaciones → click the seeded notification → back | list renders seeded rows; click navigates to its `deep_link` and marks it read; unread line "Tenés N notificaciones sin leer." while unread > 0 | auto `e2e/f06-notifications.spec.ts` | PASS (re-run after BUG-004 fix) |
 | F06-H2 | happy (email) | email "Resumen diario" Mon–Fri 08:00 → open → lands on the case | digest email in the inbox | not-built: Resend + jobs are M2 (features.csv: daily digest = must → clone no) + **manual** (email delivery) | NOT-BUILT |
 | F06-E1 | edge: empty input | all read → /notificaciones | "Estás al día con las novedades de tu estudio." + "Marcar todas como leídas" disabled | auto `f06-notifications.spec.ts` (conditional: covers both unread and all-read states) | PASS |
 | F06-E2 | edge: very long input | — | n/a: display-only screen, strings come from the system | n/a | N/A |

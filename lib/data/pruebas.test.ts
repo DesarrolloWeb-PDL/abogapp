@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedPruebas } from "@/lib/seed";
-import { getStore } from "./store";
+import { getStore, resetDataStore } from "./store";
 
 /**
  * Supabase-driver pruebas contract, fully mocked: no live project, no network.
@@ -46,6 +46,10 @@ vi.mock("@/lib/supabase/client", () => ({
 }));
 
 import { createPrueba, listPruebas } from "./pruebas";
+import { signUp } from "./auth";
+import { createCase } from "./cases";
+import { createStudy } from "./studies";
+import { DataLayerError, errorCopy } from "./errors";
 
 const calls: RecordedCall[] = [];
 const responses = new Map<string, QueryResponse[]>();
@@ -105,6 +109,9 @@ function buildQuery(call: RecordedCall): MockQuery {
 }
 
 beforeEach(() => {
+  // Fresh store per test: the fake-driver cases below write users/studies
+  // and must never leak into the seeded-length assertions.
+  resetDataStore();
   calls.length = 0;
   responses.clear();
   fromMock.mockReset();
@@ -182,6 +189,32 @@ describe("fake driver", () => {
     const pruebas = await listPruebas();
     expect(pruebas).toHaveLength(seedPruebas.length);
     expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  it("createPrueba rejects an out-of-range fecha_efectiva with a typed error (BUG-004)", async () => {
+    const signed = await signUp({
+      fullName: "Ana Beltrán",
+      email: "ana.fake@ejemplo.test",
+      password: "clave-de-prueba",
+    });
+    if (!signed.ok) throw new Error(`signUp failed: ${signed.error}`);
+    await createStudy({ name: "Estudio Fake", jurisdictions: ["Córdoba"] });
+    const kase = await createCase({ caratula: "Expediente fecha corrupta" });
+
+    // 5-digit year: the engine and the store must never see it.
+    await expect(
+      createPrueba({
+        caseId: kase.id,
+        tipo: "Informativa",
+        titulo: "Informe con año absurdo",
+        informante: "Estudio Contable Rivadavia",
+        fechaEfectiva: "61116-02-02",
+        plazo: { tipo: "corridos", cantidad: 7 },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_fecha_efectiva" });
+
+    // The guard runs before anything is written to the store.
+    expect(getStore().pruebas).toHaveLength(seedPruebas.length);
   });
 });
 
@@ -391,5 +424,105 @@ describe("supabase driver", () => {
     ).rejects.toMatchObject({ code: "invalid_plazo" });
     expect(calls.filter((call) => call.table === "pruebas")).toHaveLength(0);
     expect(calls.filter((call) => call.table === "plazos")).toHaveLength(0);
+  });
+
+  it("createPrueba rejects an out-of-range fecha_efectiva before any write (BUG-004)", async () => {
+    queueMembership();
+
+    const error = await createPrueba({
+      caseId: "case-a",
+      tipo: "Testimonial",
+      titulo: "Testigo del contrato",
+      informante: "Lucía Peralta",
+      fechaEfectiva: "61116-02-02",
+      plazo: { tipo: "corridos", cantidad: 7 },
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+
+    // Typed code + the Argentine Spanish copy the screens show (ERROR_COPY).
+    expect.soft(error).toMatchObject({ code: "invalid_fecha_efectiva" });
+    expect.soft(
+      error instanceof DataLayerError ? errorCopy(error.code) : null,
+    ).toBe("La fecha efectiva tiene que estar entre 01/01/1900 y 31/12/2100.");
+    // Nothing reaches the network before the typed failure.
+    expect(calls.filter((call) => call.table === "pruebas")).toHaveLength(0);
+    expect(calls.filter((call) => call.table === "plazos")).toHaveLength(0);
+  });
+
+  it("listPruebas maps a corrupt out-of-range fecha_limite to null, never throws (BUG-004)", async () => {
+    queueResponse("pruebas", {
+      data: [
+        {
+          ...PRUEBA_ROW,
+          plazos: [
+            {
+              ...(PRUEBA_ROW.plazos[0] as NonNullable<
+                (typeof PRUEBA_ROW.plazos)[number]
+              >),
+              // Legacy row: the trigger once wrote an absurd year, so
+              // `new Date(...)` is Invalid Date and toISOString() throws.
+              fecha_limite: "61116-02-10T02:59:59+00:00",
+            },
+          ],
+        },
+      ],
+      error: null,
+    });
+
+    // The case detail reads through this call: it must resolve so the
+    // screen stays renderable instead of "No pudimos cargar el expediente."
+    const pruebas = await listPruebas("case-a");
+
+    expect(pruebas).toHaveLength(1);
+    expect(pruebas[0]?.plazos[0]?.fechaLimite).toBeNull();
+  });
+
+  it("createPrueba survives a corrupt fecha_limite read-back (BUG-004 save abort)", async () => {
+    queueMembership();
+    queueResponse("pruebas", {
+      data: {
+        id: "prueba-9",
+        study_id: "study-9",
+        case_id: "case-a",
+        type: "testimonial",
+        titulo: "Testigo del contrato",
+        estado: "proveida",
+        fecha_efectiva: "2026-11-16",
+        informante: null,
+        parte: "Lucía Peralta",
+        plazos: [],
+      },
+      error: null,
+    });
+    queueResponse("plazos", {
+      data: {
+        id: "plazo-9",
+        study_id: "study-9",
+        case_id: "case-a",
+        prueba_id: "prueba-9",
+        tipo: "corridos",
+        cantidad: 7,
+        fecha_efectiva: "2026-11-16",
+        // Whatever the DB returns — even a corrupt value must not abort
+        // the save after the rows were already written.
+        fecha_limite: "61116-02-10T02:59:59+00:00",
+      },
+      error: null,
+    });
+
+    const prueba = await createPrueba({
+      caseId: "case-a",
+      tipo: "Testimonial",
+      titulo: "Testigo del contrato",
+      informante: "Lucía Peralta",
+      fechaEfectiva: "2026-11-16",
+      plazo: { tipo: "corridos", cantidad: 7 },
+    });
+
+    expect(prueba.plazos[0]?.fechaLimite).toBeNull();
+    // No deadline → no "Vence el …" alert (its copy would be meaningless).
+    expect(calls.filter((call) => call.table === "notifications")).toHaveLength(0);
   });
 });

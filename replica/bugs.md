@@ -97,7 +97,16 @@ Evidence (verbatim):
 - UI: main region `No pudimos cargar el expediente. | Reintentar` (reproduced twice via probe + failing runs before cleanup: `f06-notifications.spec.ts` F06-H1, `f03-prueba.spec.ts` F03-E12).
 - Bad rows were removed from the dev DB after diagnosis (seed restored); the crash path in code remains.
 Suspected cause: `mapPlazo` (`lib/supabase/pruebas.ts`) parses `fecha_limite` with `new Date(...).toISOString()` without validating, and `fecha_efectiva` has no client-side range check before insert (the engine's guards cover plazo quantity/horizon, not the anchor date).
-Status: open
+Status: **fixed** (commit pending) — defense in depth, app-side only, no schema changes:
+
+1. **Input guard**: `isValidFechaEfectiva` + `FECHA_EFECTIVA_MIN/MAX` (`1900-01-01..2100-12-31`, in `lib/data/errors.ts` so both drivers and the form share one bound) raises the new typed code `invalid_fecha_efectiva` (`ERROR_COPY`: *"La fecha efectiva tiene que estar entre 01/01/1900 y 31/12/2100."*) in **both** `createPrueba` drivers — fake (`lib/data/pruebas.ts`) and supabase (`lib/supabase/pruebas.ts`) — before any write. The add-prueba form also carries `min`/`max` + a Spanish hint on the date input.
+2. **Mapper hardening**: `mapFechaLimite` (`lib/supabase/pruebas.ts`) maps a corrupt/out-of-range `fecha_limite` to `null` instead of throwing; the detail renders the documented "Fecha pendiente" fallback and the save no longer aborts after the rows are written.
+3. **Tests (RED observed first, kept)**:
+   - `lib/data/pruebas.test.ts` → `fake driver › createPrueba rejects an out-of-range fecha_efectiva with a typed error (BUG-004)`;
+   - `lib/data/pruebas.test.ts` → `supabase driver › createPrueba rejects an out-of-range fecha_efectiva before any write (BUG-004)` (code + Spanish copy + zero network writes);
+   - `lib/data/pruebas.test.ts` → `supabase driver › listPruebas maps a corrupt out-of-range fecha_limite to null, never throws (BUG-004)` (failed pre-fix with the verbatim `RangeError: Invalid time value` at `mapPlazo`);
+   - `lib/data/pruebas.test.ts` → `supabase driver › createPrueba survives a corrupt fecha_limite read-back (BUG-004 save abort)`;
+   - `e2e/f03-prueba.spec.ts` → **F03-N4** seeds the corrupt row through REST (trigger writes `61116-02-10T02:59:59+00:00`), asserts the case detail renders (heading + "Fecha pendiente", never the error panel) and cleans the rows up.
 
 ### BUG-005: Empty Etapa chip rendered for cases without a stage (list + detail header)
 

@@ -12,7 +12,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Plazo, PlazoTipo, Prueba, PruebaTipo } from "@/lib/types";
 import { formatDate } from "@/lib/format";
-import { DataLayerError } from "@/lib/data/errors";
+import { DataLayerError, isValidFechaEfectiva } from "@/lib/data/errors";
 import type { CreatePruebaInput } from "@/lib/data/pruebas";
 import { emitNotification } from "@/lib/data/notifications";
 import { toArtIsoDate } from "@/lib/data/calendar";
@@ -91,6 +91,12 @@ export async function createPruebaSupabase(
   const informante = input.informante.trim();
   if (!titulo || !informante || !input.fechaEfectiva || !input.caseId) {
     throw new DataLayerError("missing_fields");
+  }
+  // BUG-004: same guard, same order as the fake branch — an absurd year
+  // must never reach the trigger, which would write an unparseable
+  // fecha_limite and make the whole case detail unreadable.
+  if (!isValidFechaEfectiva(input.fechaEfectiva)) {
+    throw new DataLayerError("invalid_fecha_efectiva");
   }
   // Bounds mirror computeFechaLimite's guard (1..5000, known unit) WITHOUT
   // computing any date: the trigger is the only engine in this driver.
@@ -236,10 +242,27 @@ function mapPlazo(row: PlazoRow): Plazo {
     cantidad: row.cantidad,
     fechaEfectiva: row.fecha_efectiva,
     // timestamptz (UTC) → the ART calendar day the deadline belongs to.
-    fechaLimite: row.fecha_limite
-      ? toArtIsoDate(new Date(row.fecha_limite))
-      : null,
+    fechaLimite: mapFechaLimite(row.fecha_limite),
   };
+}
+
+/**
+ * `fecha_limite` → ART calendar day, or null when the DB value cannot be
+ * parsed (BUG-004): a corrupt/out-of-range timestamp maps to the screens'
+ * "Fecha pendiente" fallback instead of throwing, so one bad legacy row can
+ * never take the whole case detail down again.
+ */
+function mapFechaLimite(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const instant = new Date(value);
+    // Invalid Date (5-digit year, garbage) must never reach toISOString().
+    if (Number.isNaN(instant.getTime())) return null;
+    return toArtIsoDate(instant);
+  } catch {
+    // toISOString RangeError at the Date edges — same safe outcome.
+    return null;
+  }
 }
 
 function mapTipo(value: string): PruebaTipo {

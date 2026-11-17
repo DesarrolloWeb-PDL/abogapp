@@ -8,6 +8,7 @@ import {
   formatDate,
   guardPage,
   restGet,
+  restSend,
   tabUntil,
   toArtDate,
 } from "./helpers";
@@ -410,6 +411,95 @@ test.describe("F03-E12 deadline render outside ART", () => {
     const guard = guardPage(page);
     await page.goto(`/expedientes/${SEED.gomezId}`);
     await expect(page.getByText(SEED.gomezPlazoBadge)).toBeVisible();
+    await guard.assertClean();
+  });
+});
+
+/** Row returned by a REST insert with `return=representation`. */
+interface RestInsertRow {
+  id: string;
+  /** plazos only — the corrupt value this regression seeds. */
+  fecha_limite?: string;
+}
+
+test.describe("F03-N4 corrupt fecha_limite regression (BUG-004)", () => {
+  test("case detail renders when the DB holds an out-of-range fecha_limite", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const caratula = `E2E fecha corrupta ${stamp}`;
+    const titulo = `Prueba fecha corrupta ${stamp}`;
+
+    // The form itself advertises the sane window (BUG-004 prevention).
+    await page.goto(`/expedientes/${SEED.gomezId}/pruebas/nueva`);
+    const fechaInput = page.getByLabel("Fecha efectiva");
+    await expect(fechaInput).toHaveAttribute("min", "1900-01-01");
+    await expect(fechaInput).toHaveAttribute("max", "2100-12-31");
+
+    // A throwaway case (same UI flow as F03-H1), unique per run.
+    await page.goto("/expedientes");
+    await page.getByRole("link", { name: "Nuevo expediente" }).click();
+    await page.getByLabel("Carátula").fill(caratula);
+    await page.getByRole("button", { name: "Crear expediente" }).click();
+    // The heading wait matters: waitForURL alone also matches the
+    // intermediate `/expedientes/nueva` route before the redirect lands.
+    await page.waitForURL(/\/expedientes\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: caratula })).toBeVisible();
+    const caseId = /\/expedientes\/([^/?]+)/.exec(page.url())![1];
+    expect(caseId).toMatch(/^[0-9a-f-]{36}$/);
+
+    let plazoId: string | null = null;
+    let pruebaId: string | null = null;
+    try {
+      // Seed the exact BUG-004 shape through REST: an absurd anchor year
+      // makes the trigger write fecha_limite "61116-02-10T02:59:59+00:00".
+      const [studyRow] = await restGet<{ study_id: string }[]>(
+        `cases?id=eq.${caseId}&select=study_id`,
+      );
+      const [pruebaRow] = await restSend<RestInsertRow[]>("POST", "pruebas", {
+        study_id: studyRow.study_id,
+        case_id: caseId,
+        type: "informativa",
+        titulo,
+        parte: "Estudio Contable Rivadavia",
+        fecha_efectiva: "61116-02-02",
+      });
+      pruebaId = pruebaRow.id;
+      const [plazoRow] = await restSend<RestInsertRow[]>("POST", "plazos", {
+        study_id: studyRow.study_id,
+        case_id: caseId,
+        prueba_id: pruebaRow.id,
+        concepto: titulo,
+        tipo: "corridos",
+        cantidad: 7,
+        fecha_efectiva: "61116-02-02",
+        source: "prueba",
+      });
+      plazoId = plazoRow.id;
+      // The corrupt row really exists in the DB (the trigger accepts it).
+      expect(plazoRow.fecha_limite).toContain("61116-02-10");
+
+      // The whole case must render — never the generic error panel.
+      await page.goto(`/expedientes/${caseId}`);
+      await expect(page.getByRole("heading", { name: caratula })).toBeVisible();
+      await expect(
+        page.getByText("No pudimos cargar el expediente."),
+      ).toHaveCount(0);
+      // The corrupt deadline degrades to the documented safe fallback.
+      await expect(page.getByText("Fecha pendiente")).toBeVisible();
+
+      // The Pruebas tab stays readable too (the seeded prueba row).
+      await page.getByRole("link", { name: "Pruebas" }).click();
+      await expect(page).toHaveURL(/tab=pruebas/);
+      await expect(page.getByText(titulo)).toBeVisible();
+    } finally {
+      // Clean the seeded rows up (order respects the foreign keys).
+      if (plazoId) await restSend("DELETE", `plazos?id=eq.${plazoId}`);
+      if (pruebaId) await restSend("DELETE", `pruebas?id=eq.${pruebaId}`);
+      await restSend("DELETE", `cases?id=eq.${caseId}`);
+    }
+
     await guard.assertClean();
   });
 });

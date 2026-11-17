@@ -9,6 +9,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { createPrueba, DataLayerError, errorCopy } from "@/lib/data";
+import { FECHA_EFECTIVA_MAX, FECHA_EFECTIVA_MIN } from "@/lib/data/errors";
 import { seedCases } from "@/lib/seed";
 import type { PlazoTipo, PruebaTipo } from "@/lib/types";
 
@@ -121,6 +122,11 @@ export function NuevaPruebaForm({ caseId }: { caseId: string }) {
           label="Fecha efectiva"
           name="fecha_efectiva"
           type="date"
+          // BUG-004: the picker and the data layer share one sane window;
+          // the typed rejection still comes back as a toast on submit.
+          min={FECHA_EFECTIVA_MIN}
+          max={FECHA_EFECTIVA_MAX}
+          hint="Cargá una fecha entre 01/01/1900 y 31/12/2100."
           required
         />
 

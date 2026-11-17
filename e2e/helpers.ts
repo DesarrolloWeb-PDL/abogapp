@@ -221,6 +221,35 @@ export async function restGet<T>(pathAndQuery: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * RLS-scoped REST write (POST/DELETE) with `return=representation`, so a
+ * spec can seed a row and read it back (or clean it up) through the same
+ * demo-user credentials `restGet` uses.
+ */
+export async function restSend<T = unknown>(
+  method: "POST" | "DELETE",
+  pathAndQuery: string,
+  body?: unknown,
+): Promise<T> {
+  const response = await fetch(
+    `${envLocal("NEXT_PUBLIC_SUPABASE_URL")}/rest/v1/${pathAndQuery}`,
+    {
+      method,
+      headers: {
+        apikey: envLocal("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+        authorization: `Bearer ${await demoToken()}`,
+        "content-type": "application/json",
+        prefer: "return=representation",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`REST ${method} ${pathAndQuery} -> ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 /* ------------------------------------------------------------- webhook ---- */
 
 /** `X-Hub-Signature-256` over the raw body, exactly like Meta signs it. */

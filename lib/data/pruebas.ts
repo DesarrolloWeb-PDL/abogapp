@@ -13,7 +13,7 @@ import { formatDate } from "@/lib/format";
 import type { Plazo, PlazoTipo, Prueba, PruebaTipo } from "@/lib/types";
 import { requireSession } from "./auth";
 import { nonWorkingDays, toArtIsoDate } from "./calendar";
-import { DataLayerError } from "./errors";
+import { DataLayerError, isValidFechaEfectiva } from "./errors";
 import { getDataDriver } from "./driver";
 import { insertNotification } from "./notifications";
 import { getStore, nextId } from "./store";
@@ -50,6 +50,13 @@ export async function createPrueba(input: CreatePruebaInput): Promise<Prueba> {
   const informante = input.informante.trim();
   if (!titulo || !informante || !input.fechaEfectiva || !input.caseId) {
     throw new DataLayerError("missing_fields");
+  }
+  // BUG-004: the engine trusts its anchor date, so an absurd year would
+  // reach computeFechaLimite and poison every read of the case back.
+  // Same guard, same order as the supabase branch (one shared bound in
+  // ./errors), and it runs before anything is written to the store.
+  if (!isValidFechaEfectiva(input.fechaEfectiva)) {
+    throw new DataLayerError("invalid_fecha_efectiva");
   }
 
   const pruebaId = nextId("prueba");
