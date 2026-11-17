@@ -43,3 +43,6 @@ next-env.d.ts
 
 # engram / skill registry caches
 .atl/.skill-registry.cache.json
+e2e/.auth/
+test-results/
+playwright-report/
