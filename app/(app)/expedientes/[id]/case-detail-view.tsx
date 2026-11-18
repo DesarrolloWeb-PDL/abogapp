@@ -10,18 +10,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getCase, listPruebas } from "@/lib/data";
 import { formatDate } from "@/lib/format";
 import type { Prueba, StudyCase } from "@/lib/types";
+import { MovimientosTab } from "./movimientos-tab";
 
 /**
- * Case detail hub (S08) — M1 slice: Resumen + Pruebas tabs with the
- * `?tab=` deep link. Data loads through the data layer in the browser (the
- * fake store lives client-side), with skeleton / missing / error states.
- * Full tab payloads arrive with T6.
+ * Case detail hub (S08) — M1/M2 slice: Resumen + Movimientos + Pruebas
+ * tabs with the `?tab=` deep link. Data loads through the data layer in
+ * the browser (the fake store lives client-side), with skeleton /
+ * missing / error states. The remaining tabs (Actuaciones, Tareas,
+ * Audiencias, Agenda, Partes, Documentos, Finanzas) arrive later.
  */
 
-export type CaseDetailTab = "resumen" | "pruebas";
+export type CaseDetailTab = "resumen" | "movimientos" | "pruebas";
 
 const TABS: ReadonlyArray<{ value: CaseDetailTab; label: string }> = [
   { value: "resumen", label: "Resumen" },
+  { value: "movimientos", label: "Movimientos" },
   { value: "pruebas", label: "Pruebas" },
 ];
 
@@ -242,6 +245,8 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
             </CardBody>
           </Card>
         </div>
+      ) : tab === "movimientos" ? (
+        <MovimientosTab caseId={record.id} />
       ) : (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">

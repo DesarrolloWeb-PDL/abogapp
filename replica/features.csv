@@ -15,7 +15,7 @@ Case detail hub with tabs,expedientes,must,yes,partial,S08 | Resumen + Pruebas t
 Favorites / archive / soft-delete cases,expedientes,must,yes,no,S07 row menu and bulk bar; favorites are studio-wide | M2
 Vista general cross-case matrix,expedientes,could,yes,no,S15; read-only by design; thin evidence
 Case stages (etapas) settings,expedientes,should,yes,no,S30 settings page | M2; the case form already consumes seeded stages (lib/data/stages; stages.test.ts)
-Manual movement log per case,movimientos,must,yes,no,S09; hand-entered history distinct from portal actuaciones | M2
+Manual movement log per case,movimientos,must,yes,yes,S09; hand-entered history distinct from portal actuaciones | M2 shipped: list + create + pin + tipo/range/search filters + all states (e2e m2-movimientos)
 Actuaciones list with estado chips,movimientos,should,yes,no,S10; synced cases only; 7 estado values
 In-app document reader with citations,movimientos,should,yes,no,S11; J and K navigation; Copiar cita with page
 Novedades judiciales feed (two views),movimientos,should,yes,no,S05 and S06; por expediente / por novedad

@@ -9,9 +9,10 @@ import {
 export const metadata: Metadata = { title: "Expediente" };
 
 /**
- * Case detail hub (S08) — M1 stub with the Resumen + Pruebas tabs and the
- * `?tab=` deep link (values are documented as unknown in the recon, so the
- * clone owns its own values: `resumen` | `pruebas`).
+ * Case detail hub (S08) — M2 slice with the Resumen + Movimientos +
+ * Pruebas tabs and the `?tab=` deep link (values are documented as unknown
+ * in the recon, so the clone owns its own values: `resumen` |
+ * `movimientos` | `pruebas`).
  *
  * `params` and `searchParams` are Promises in Next.js 16 and, with
  * cacheComponents enabled, must be awaited inside a Suspense boundary —
@@ -22,7 +23,7 @@ export const metadata: Metadata = { title: "Expediente" };
  * during this session.
  */
 
-const TAB_VALUES = ["resumen", "pruebas"] as const;
+const TAB_VALUES = ["resumen", "movimientos", "pruebas"] as const;
 
 export default function CaseDetailPage({
   params,

@@ -63,6 +63,26 @@ export {
   type UpdateTaskPatch,
 } from "./tasks";
 
+// Movements (S09) — the case's MANUAL movement log: create + pin toggle +
+// tipo/date/search filters, no notifications (S09 never asks for one).
+export {
+  MOVEMENT_DETALLE_MAX,
+  MOVEMENT_TIPOS,
+  applyMovementFilter,
+  compareMovementsByFecha,
+  createMovement,
+  isMovementTipo,
+  listMovements,
+  movementPinBadge,
+  updateMovement,
+  type CreateMovementInput,
+  type Movement,
+  type MovementFilter,
+  type MovementQuery,
+  type MovementTipo,
+  type UpdateMovementPatch,
+} from "./movements";
+
 // Notifications (S21)
 export {
   listNotifications,
