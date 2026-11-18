@@ -7,6 +7,12 @@
  *    to the rows it just stored.
  * Keeping one implementation guarantees the demo and the real inbox answer
  * identically.
+ *
+ * Rules stay in code (STOP, status gating, the greeting trigger); the
+ * message STRINGS the study can edit live in the `bot_settings` row (admin
+ * screen /configuracion/bot) and reach this function through `settings`.
+ * Callers that have not loaded settings (or that failed to) pass nothing and
+ * get exactly the behaviour they had before the settings existed.
  */
 
 import type { WaConversationStatus } from "@/lib/types";
@@ -24,22 +30,60 @@ const STOP_PATTERN = /^(stop|baja|cancelar)[.!]?$/i;
 const GREETING_PATTERN =
   /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hey|qu[eé] tal)\b/i;
 
-const GREETING_REPLY =
+/** The built-in greeting — also the `greeting` default of bot_settings. */
+export const GREETING_REPLY =
   "¡Hola! Soy el asistente del estudio. ¿En qué te puedo ayudar?";
 
+/** Acknowledgement for anything that is not a greeting (no settings home:
+ *  bot_settings holds the three editable strings, this one stays fixed). */
 const DEFAULT_REPLY =
   "Recibí tu mensaje. Alguien del estudio se va a comunicar con vos a la brevedad.";
+
+/** One study's editable bot configuration (the bot_settings row). */
+export interface BotSettings {
+  studyId: string;
+  enabled: boolean;
+  greeting: string;
+  offHours: string;
+  handoff: string;
+}
+
+/** The subset decideBotReply consumes; absent fields fall back to constants. */
+export type BotReplySettings = Partial<Pick<BotSettings, "enabled" | "greeting">>;
+
+/**
+ * Defaults seeded by supabase/migrations/20261117120000_bot_settings.sql
+ * (column defaults + backfill + init_study_defaults) — keep the three
+ * strings byte-identical to that file.
+ *
+ * `offHours` and `handoff` have no M1 rule yet: the after-hours check
+ * (whatsapp-bot.md flow 7) and the handoff trigger (flow 6) arrive with
+ * Unit 2. They ship stored and editable now so that unit needs no second
+ * migration.
+ */
+export const DEFAULT_BOT_SETTINGS: Omit<BotSettings, "studyId"> = {
+  enabled: true,
+  greeting: GREETING_REPLY,
+  offHours:
+    "Estamos fuera de horario: de lunes a viernes de 9 a 18 respondemos las consultas de una persona. El asistente sigue tomando tus datos a cualquier hora y el próximo día hábil te respondemos.",
+  handoff:
+    "Te paso con una persona del estudio. En horario hábil te responden el mismo día; si es fuera de horario, el próximo día hábil.",
+};
 
 /**
  * Rules (M1):
  *  - a conversation already stopped by STOP never replies again;
- *  - `STOP` / `baja` / `cancelar` closes the conversation silently;
- *  - greetings get the greeting, anything else gets an acknowledgement;
+ *  - `STOP` / `baja` / `cancelar` closes the conversation silently — the
+ *    opt-out is honoured even when the study switched the bot off;
+ *  - `enabled: false` (the admin toggle) keeps the bot silent;
+ *  - greetings get `settings.greeting` (falling back to GREETING_REPLY),
+ *    anything else gets the acknowledgement;
  *  - every other status keeps answering exactly as before.
  */
 export function decideBotReply(
   currentStatus: WaConversationStatus,
   text: string,
+  settings?: BotReplySettings | null,
 ): BotDecision {
   if (currentStatus === "cerrada") {
     return { reply: null, nextStatus: "cerrada" };
@@ -47,7 +91,11 @@ export function decideBotReply(
   if (STOP_PATTERN.test(normalize(text))) {
     return { reply: null, nextStatus: "cerrada" };
   }
-  const reply = GREETING_PATTERN.test(text) ? GREETING_REPLY : DEFAULT_REPLY;
+  if (settings && settings.enabled === false) {
+    return { reply: null, nextStatus: currentStatus };
+  }
+  const greeting = settings?.greeting?.trim() || GREETING_REPLY;
+  const reply = GREETING_PATTERN.test(text) ? greeting : DEFAULT_REPLY;
   return { reply, nextStatus: currentStatus };
 }
 

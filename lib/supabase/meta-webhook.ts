@@ -8,7 +8,9 @@
  *  1. idempotency: every Meta delivery inserts into `wa_webhook_events`
  *     (event_key unique) — a retry hits 23505 and becomes a counted no-op;
  *  2. contact + conversation upsert, inbound message stored;
- *  3. the shared bot rules (lib/data/bot.ts) decide the reply;
+ *  3. the shared bot rules (lib/data/bot.ts), fed by the study's
+ *     bot_settings row (Unit 1: configurable greeting/toggle), decide the
+ *     reply;
  *  4. reply stored as an outbound message; conversation preview/status
  *     updated; event marked processed;
  *  5. a failed handler DELETES the event row (mirrors releaseEventKey in
@@ -16,10 +18,11 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { decideBotReply } from "@/lib/data/bot";
+import { decideBotReply, type BotSettings } from "@/lib/data/bot";
 import { parseInboundMessages, type ParsedInbound } from "@/lib/data/webhook";
 import type { WebhookProcessResult } from "@/lib/data/webhook";
 import { getServiceClient } from "./service";
+import { getBotSettingsSupabase } from "./bot-settings";
 
 const UNIQUE_VIOLATION = "23505";
 const PROVIDER = "whatsapp_cloud_api";
@@ -113,7 +116,18 @@ async function storeInboundAndReply(
     status: "received",
   });
 
-  const decision = decideBotReply(conversation.status, message.text);
+  // Unit 1: the study's bot_settings row drives the reply copy — ONE read
+  // per inbound message (never per field: no N+1). A failed read must never
+  // stop the bot answering, so it falls back to null and decideBotReply
+  // uses the built-in defaults (identical to the pre-settings behaviour).
+  let settings: BotSettings | null = null;
+  try {
+    settings = await getBotSettingsSupabase(study.id, supabase);
+  } catch {
+    settings = null;
+  }
+
+  const decision = decideBotReply(conversation.status, message.text, settings);
   const now = new Date().toISOString();
   const windowExpires = new Date(Date.now() + WINDOW_MS).toISOString();
 

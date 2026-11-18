@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { Bell, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
+import { Bell, FolderOpen, MessageSquare, Settings, type LucideIcon } from "lucide-react";
 import { useUnreadCount } from "@/components/shell/use-unread-count";
 
 /**
- * M1 navigation subset: Expedientes, Bandeja WhatsApp and Notificaciones.
- * The full sidebar (Inicio, Tareas, Agenda…) arrives with later milestones.
+ * M1 navigation subset: Expedientes, Bandeja WhatsApp, Notificaciones and
+ * the bot Configuración screen (WhatsApp Unit 1). The full sidebar (Inicio,
+ * Tareas, Agenda…) arrives with later milestones.
  *
  * `usePathname` lives in a child component behind <Suspense> because this nav
  * renders from a shared layout above dynamic routes (/expedientes/[id]): with
@@ -33,6 +34,7 @@ export const mainNavItems: NavItem[] = [
     icon: Bell,
     showsUnread: true,
   },
+  { href: "/configuracion/bot", label: "Configuración", icon: Settings },
 ];
 
 interface NavListProps {

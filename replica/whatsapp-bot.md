@@ -352,3 +352,98 @@ Non-WhatsApp `must` rows the bot reuses rather than reimplements: manual case
 creation (`POST /api/cases`, flow 3), notifications (appointment + handoff
 alerts reuse `notifications`), agenda/events (booked slot writes an `events`
 row).
+
+---
+
+## 7. Admin de mensajes — `/configuracion/bot` (WhatsApp Unit 1)
+
+**Entry:** sidebar item **Configuración** (below Notificaciones, icon
+`settings`, Lucide — `components/shell/main-nav.tsx`). Route
+`/configuracion/bot`, own route like A01 (not part of the Veredicta `S`-ID
+set). Mobile `<768px`: no bottom-bar slot yet (the bar keeps Expedientes /
+Bandeja / Avisos), so the screen is reachable from the desktop sidebar or
+by URL — promoted to the bar only if usage justifies it.
+
+**Why:** Module A's greeting was hardcoded in `lib/data/bot.ts` and the
+off-hours / handoff strings had no home at all. This unit externalises all
+three into one study-level row so the studio edits the bot's copy without a
+deploy.
+
+**Storage — `bot_settings`** (migration
+`supabase/migrations/20261117120000_bot_settings.sql`, mirrored in
+`replica/schema.sql`): one row per study (`study_id` PK, `on delete
+cascade`), `enabled boolean`, three `text` columns with 1..500-char checks,
+`created_at`/`updated_at` (the `set_updated_at` trigger attached
+explicitly — the init migration's DO loop only covered the tables that
+existed when it ran), RLS enabled with `is_member(study_id)` SELECT/UPDATE
+policies plus an explicit INSERT `with check` (the app upserts the defaults
+when a row is missing; no DELETE policy on purpose). Seeded twice: the
+migration backfills every existing study, `init_study_defaults()` gives
+every NEW study the row — both fill from the column defaults, which are
+byte-identical to `DEFAULT_BOT_SETTINGS` in `lib/data/bot.ts` (**keep the
+two in sync**).
+
+**Form** (`app/(app)/configuracion/bot/`, all `[UI copy]`, rioplatense
+voseo):
+
+| element | copy |
+| --- | --- |
+| heading | `Configuración del bot` |
+| toggle | `Bot activado` → `El bot responde a los saludos de tus clientes.` / `El bot está en pausa: no responde a los mensajes.` |
+| field | `Saludo` — hint `Respuesta del bot cuando alguien escribe un saludo, por ejemplo «hola».` |
+| field | `Fuera de horario` — hint `Texto para avisar el horario de atención: lunes a viernes de 9 a 18.` |
+| field | `Traspaso a humano` — hint `Texto para avisar que la consulta la retoma una persona del estudio.` |
+| actions | `Guardar cambios` → toast `Guardamos la configuración del bot.` · `Descartar cambios` |
+| inline errors | `El saludo no puede quedar vacío.` (and the same shape per field, plus `… no puede superar los 500 caracteres.`) |
+| load error | `No pudimos cargar la configuración del bot.` + `Reintentar` |
+
+States: loading skeleton (`aria-busy`), error + Reintentar — this doubles
+as the M1 "no permission" state, since RLS returns a row only to members —
+and the ready form with per-field inline errors. Validation runs twice: per
+field in the form (precise Spanish copy) and in the data layer
+(`updateBotSettings`: non-empty trimmed copy, ≤500 = `BOT_MESSAGE_MAX`,
+boolean `enabled`, typed `missing_fields`), before anything reaches a
+store.
+
+**Rules vs copy:** `decideBotReply(status, text, settings?)` keeps every
+RULE in code (STOP, status gating, the greeting trigger) and takes the
+strings from `settings`:
+
+- `greeting` replaces the built-in `GREETING_REPLY` (fallback when absent);
+- `enabled: false` keeps the bot silent — STOP still closes the
+  conversation, because opt-out is never gated on the bot being on;
+- callers that pass no settings (fake driver, failed reads) behave exactly
+  as before this unit existed.
+
+The webhook reads the row **once per inbound message** through
+`getBotSettingsSupabase(studyId, client)` with its service-role client (no
+N+1) and falls back to the built-in defaults when the read fails — a
+settings outage must never stop the bot from answering.
+
+**Scope notes (M1):**
+
+- `off_hours` (WA-009) and `handoff` (WA-013) are stored, validated and
+  editable but NOT yet consumed by any rule: the after-hours clock check
+  (flow 7) and the handoff trigger (flow 6) arrive with Unit 2 — which
+  needs no further migration for them, by design.
+- **Permission gap:** ANY member can edit the bot copy (RLS `is_member`
+  only) — no owner/admin gate. Whether "configurar el bot" becomes an S27
+  permission key is left to the roles work.
+- The non-greeting acknowledgement (`DEFAULT_REPLY`) stays a code constant:
+  `bot_settings` holds only the three study-editable strings.
+
+**Unit-2 prep shipped in the same migration:** `alter table wa_conversations
+add column if not exists last_inbound_at timestamptz` — the column has
+existed since `20261114120000_init.sql` and in `replica/schema.sql`, so the
+statement is an idempotent guard that keeps any older database in step.
+Meta's 24 h customer-service window (flow 9) computes
+`window_expires_at = last inbound + 24 h` from this column, which
+`meta-webhook.ts` has written on every delivery since T8.
+
+**Tests:** `lib/data/bot-settings.test.ts` (bot uses the settings — custom
+greeting appears in the reply; validation rejects empty/oversized;
+supabase upsert-defaults with a mocked client; fake-driver parity) and
+`e2e/bot-settings.spec.ts` (login → Configuración → change the greeting →
+save → signed webhook → the new greeting in the inbox thread; skips with a
+printed reason until the migration is applied; restores the defaults in
+`finally`).

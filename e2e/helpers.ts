@@ -226,6 +226,34 @@ export async function restSend<T = unknown>(
   return (await response.json()) as T;
 }
 
+/**
+ * RLS-scoped REST update (PATCH) with `return=representation` — the write
+ * counterpart of `restGet` for row updates (e.g. restoring bot_settings in
+ * a spec's cleanup). Empty result array = no matching row, still a success.
+ */
+export async function restPatch<T = unknown>(
+  pathAndQuery: string,
+  body: unknown,
+): Promise<T> {
+  const response = await fetch(
+    `${envLocal("NEXT_PUBLIC_SUPABASE_URL")}/rest/v1/${pathAndQuery}`,
+    {
+      method: "PATCH",
+      headers: {
+        apikey: envLocal("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+        authorization: `Bearer ${await demoToken()}`,
+        "content-type": "application/json",
+        prefer: "return=representation",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`REST PATCH ${pathAndQuery} -> ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 /* ------------------------------------------------------------- webhook ---- */
 
 /** `X-Hub-Signature-256` over the raw body, exactly like Meta signs it. */

@@ -61,6 +61,17 @@ export {
   type InboundMessageResult,
 } from "./whatsapp";
 
+// WhatsApp bot settings — admin screen /configuracion/bot (Unit 1)
+export {
+  BOT_MESSAGE_MAX,
+  getBotSettings,
+  updateBotSettings,
+  validateBotSettingsInput,
+  type BotSettings,
+  type BotSettingsFieldErrors,
+  type UpdateBotSettingsInput,
+} from "./bot-settings";
+
 // Errors: typed codes + the Spanish copy the UI shows.
 export { DataLayerError, ERROR_COPY, errorCopy, type DataErrorCode } from "./errors";
 

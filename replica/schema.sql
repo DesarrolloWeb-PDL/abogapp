@@ -1180,6 +1180,32 @@ create index idx_wa_appointments_study_start on wa_appointments (study_id, statu
 create index idx_wa_appointments_conversation on wa_appointments (conversation_id);
 create index idx_wa_appointments_contact on wa_appointments (contact_id);
 
+-- ----------------------------------------------------------------------------
+-- bot_settings — study-level bot configuration behind the admin screen
+-- /configuracion/bot (WhatsApp Unit 1, "admin de mensajes"). ONE row per
+-- study (study_id IS the primary key): the bot on/off flag plus the three
+-- message strings the members edit. The defaults are byte-identical to
+-- DEFAULT_BOT_SETTINGS in lib/data/bot.ts (keep in sync); the length checks
+-- mirror the data layer's validation (BOT_MESSAGE_MAX = 500). The
+-- `set_updated_at` trigger comes from the generic loop at the end of this
+-- file — this table is created before it runs, exactly like every other.
+-- ----------------------------------------------------------------------------
+create table bot_settings (
+  study_id uuid primary key references studies (id) on delete cascade,
+  enabled boolean not null default true,
+  greeting text not null
+    default '¡Hola! Soy el asistente del estudio. ¿En qué te puedo ayudar?'
+    check (char_length(greeting) between 1 and 500),
+  off_hours text not null
+    default 'Estamos fuera de horario: de lunes a viernes de 9 a 18 respondemos las consultas de una persona. El asistente sigue tomando tus datos a cualquier hora y el próximo día hábil te respondemos.'
+    check (char_length(off_hours) between 1 and 500),
+  handoff text not null
+    default 'Te paso con una persona del estudio. En horario hábil te responden el mismo día; si es fuera de horario, el próximo día hábil.'
+    check (char_length(handoff) between 1 and 500),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- ============================================================================
 -- AI / ASSISTANT (could-haves; own implementation, no proprietary prompts)
 -- ============================================================================
@@ -1422,6 +1448,14 @@ begin
     (p_study_id, 'Ejecución',    5)
   on conflict (study_id, name) do nothing;
 
+  -- WhatsApp bot settings (Unit 1, /configuracion/bot): one row per study so
+  -- the admin screen and the webhook always find values; the COLUMN DEFAULTS
+  -- of bot_settings supply the copy, keeping this insert in step with them
+  -- automatically. Idempotent: an existing row keeps the study's edits.
+  insert into bot_settings (study_id)
+  values (p_study_id)
+  on conflict (study_id) do nothing;
+
   -- TODO(gap): default event categories (6 names / 11 colors) are not
   -- evidenced; seed here once replica-design confirms them.
 end;
@@ -1488,6 +1522,20 @@ begin
   end loop;
 end;
 $$;
+
+-- bot_settings keeps the same tenant rule as the group above but split by
+-- verb (mirrored byte-compatible in migrations/20261117120000_bot_settings.sql):
+-- SELECT/UPDATE for every member of the study, and an explicit INSERT with
+-- `with check` so the app's upsert-on-missing (getBotSettings) can create the
+-- defaults row itself. No DELETE policy on purpose — nothing deletes settings
+-- rows, and a missing row is re-created with the defaults anyway.
+alter table bot_settings enable row level security;
+create policy bot_settings_select on bot_settings
+  for select using (is_member(study_id));
+create policy bot_settings_update on bot_settings
+  for update using (is_member(study_id)) with check (is_member(study_id));
+create policy bot_settings_insert on bot_settings
+  for insert with check (is_member(study_id));
 
 -- document_versions has no study_id column: tenancy derives from the parent
 -- document, so this policy resolves it through documents.study_id.
