@@ -10,7 +10,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StudyCase } from "@/lib/types";
 import { DataLayerError } from "@/lib/data/errors";
-import type { CreateCaseInput } from "@/lib/data/cases";
+import {
+  applyCaseFilters,
+  type CaseListFilter,
+  type CreateCaseInput,
+} from "@/lib/data/cases";
 import { requireStudy } from "@/lib/data/studies";
 import { getBrowserClient } from "./client";
 
@@ -48,19 +52,32 @@ interface CaseRow {
   created_by: { full_name: string | null } | null;
 }
 
-/** Non-archived, non-deleted cases of my studies, newest activity first (S07). */
-export async function listCasesSupabase(): Promise<StudyCase[]> {
+/**
+ * Cases of my studies for one partition, newest activity first (S07).
+ * `archivedView` is the ONLY server-side filter (it changes the row set:
+ * eq(archivado) vs the default not(archivado)); the remaining predicates
+ * run through the shared `applyCaseFilters` after the map — same output as
+ * the fake driver, one read either way (fetch-once pattern).
+ */
+export async function listCasesSupabase(
+  filter?: CaseListFilter,
+): Promise<StudyCase[]> {
   const supabase = getBrowserClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("cases")
     .select(CASE_COLUMNS)
-    .not("archivado", "is", true)
-    .is("deleted_at", null)
-    .order("last_activity_at", { ascending: false });
+    .is("deleted_at", null);
+  query = filter?.archivedView
+    ? query.eq("archivado", true)
+    : query.not("archivado", "is", true);
+
+  const { data, error } = await query.order("last_activity_at", {
+    ascending: false,
+  });
   if (error || !data) throw new DataLayerError("save_failed");
 
-  return (data as unknown as CaseRow[]).map(mapCase);
+  return applyCaseFilters((data as unknown as CaseRow[]).map(mapCase), filter);
 }
 
 /** One case by id; RLS answers null for ids outside my studies. */
@@ -138,6 +155,92 @@ export async function createCaseSupabase(
   if (error || !row) throw new DataLayerError("save_failed");
 
   return mapCase(row as unknown as CaseRow);
+}
+
+/**
+ * One narrow patch helper: a single UPDATE scoped to a live row under RLS
+ * (the tenancy guard — same no-pre-check convention as the reads above).
+ * 0 rows back (unknown id, other study's row, already soft-deleted) is the
+ * typed failure; 1 row back is the mapped result.
+ */
+async function patchCaseRow(
+  id: string,
+  payload: Record<string, unknown>,
+): Promise<StudyCase> {
+  const supabase = getBrowserClient();
+
+  const { data, error } = await supabase
+    .from("cases")
+    .update(payload)
+    .eq("id", id)
+    .is("deleted_at", null)
+    .select(CASE_COLUMNS)
+    .single();
+  if (error || !data) throw new DataLayerError("save_failed");
+
+  return mapCase(data as unknown as CaseRow);
+}
+
+/** Studio-wide favorite toggle (S07 star) — writes `favorito` only. */
+export async function toggleFavoriteSupabase(
+  id: string,
+  next: boolean,
+): Promise<StudyCase> {
+  return patchCaseRow(id, { favorito: next });
+}
+
+/** Archive/unarchive one case (row ⋯ menu) — writes `archivado` only. */
+export async function archiveCaseSupabase(
+  id: string,
+  archived: boolean,
+): Promise<StudyCase> {
+  return patchCaseRow(id, { archivado: archived });
+}
+
+/**
+ * Bulk archive (bulk bar): ONE UPDATE over the id list. The affected-count
+ * check mirrors the fake layer's validate-then-write: fewer rows back than
+ * ids sent means an unknown/RLS-hidden id → typed error. Rows already in
+ * the requested state still match the UPDATE, so re-archiving succeeds
+ * unchanged (idempotent no-op success).
+ */
+export async function bulkArchiveSupabase(
+  ids: string[],
+  archived: boolean,
+): Promise<StudyCase[]> {
+  if (ids.length === 0) throw new DataLayerError("missing_fields");
+
+  const unique = [...new Set(ids)];
+  const supabase = getBrowserClient();
+
+  const { data, error } = await supabase
+    .from("cases")
+    .update({ archivado: archived })
+    .in("id", unique)
+    .is("deleted_at", null)
+    .select(CASE_COLUMNS);
+  if (error || !data || data.length !== unique.length) {
+    throw new DataLayerError("save_failed");
+  }
+
+  return (data as unknown as CaseRow[]).map(mapCase);
+}
+
+/**
+ * Soft delete (Eliminar): stamps `deleted_at`, the column every read
+ * already excludes — the row vanishes from lists and getCase answers null.
+ */
+export async function softDeleteCaseSupabase(id: string): Promise<void> {
+  const supabase = getBrowserClient();
+
+  const { data, error } = await supabase
+    .from("cases")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("deleted_at", null)
+    .select("id")
+    .single();
+  if (error || !data) throw new DataLayerError("save_failed");
 }
 
 async function requireUser(

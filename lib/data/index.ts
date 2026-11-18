@@ -34,8 +34,23 @@ export {
   type CreateStudyInput,
 } from "./studies";
 
-// Cases (S07)
-export { createCase, getCase, listCases, type CreateCaseInput } from "./cases";
+// Cases (S07) — list + filters/sort predicates + narrow patches
+// (favorite / archive / bulk archive / soft delete).
+export {
+  applyCaseFilters,
+  archiveCase,
+  bulkArchive,
+  compareCasesBy,
+  createCase,
+  getCase,
+  listCases,
+  softDeleteCase,
+  toggleFavorite,
+  type CaseListFilter,
+  type CaseSortKey,
+  type CreateCaseInput,
+  type SortDirection,
+} from "./cases";
 
 // Case stages / etapas (S07 form + S30 settings)
 export { listStages, type CaseStage } from "./stages";

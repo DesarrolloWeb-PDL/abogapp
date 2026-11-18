@@ -10,9 +10,9 @@ Other portal connectors (EJE / IOL / SED / PCJ),judicial-sync,could,yes,no,S25 c
 Background sync scheduler with status chips,judicial-sync,should,yes,no,S25; Conectada / Sincronizando / Error; ~30 min cadence
 Sync error handling and rate-limit retry,judicial-sync,should,yes,no,F01 edges; five attempts then stop then auto-retry 2 min to 6 h
 Manual case creation,expedientes,must,yes,yes,Module B MVP entry point; S07 Nuevo expediente | implemented through the data layer; F03-H1 green (form -> DB row)
-Expedientes list with search and filters,expedientes,must,yes,partial,S07 | list + accent/typo-tolerant search shipped (BUG-003 fix; lib/search.ts; F02-E3 green); Filtros panel; favorites; archive = M2
+Expedientes list with search and filters,expedientes,must,yes,partial,S07 | search + Filtros panel with active-count badge + favorites + archive shipped (e2e m2-expedientes); pending: sync filter + column resize/reorder + 50-per-page loading
 Case detail hub with tabs,expedientes,must,yes,partial,S08 | Resumen + Pruebas tabs with ?tab= deep link (F02-E7 refresh keeps it); remaining 8 tabs = M2
-Favorites / archive / soft-delete cases,expedientes,must,yes,no,S07 row menu and bulk bar; favorites are studio-wide | M2
+Favorites / archive / soft-delete cases,expedientes,must,yes,yes,S07 row menu and bulk bar; favorites are studio-wide | M2 shipped: star + archivar/desarchivar + soft-delete tras confirm + barra bulk (e2e m2-expedientes)
 Vista general cross-case matrix,expedientes,could,yes,no,S15; read-only by design; thin evidence
 Case stages (etapas) settings,expedientes,should,yes,no,S30 settings page | M2; the case form already consumes seeded stages (lib/data/stages; stages.test.ts)
 Manual movement log per case,movimientos,must,yes,yes,S09; hand-entered history distinct from portal actuaciones | M2 shipped: list + create + pin + tipo/range/search filters + all states (e2e m2-movimientos)

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedCases, seedDemoPassword, seedUser } from "@/lib/seed";
-import { getStore } from "./store";
+import type { StudyCase } from "@/lib/types";
+import { getStore, resetDataStore } from "./store";
 
 /**
  * Supabase-driver cases contract, fully mocked: no live project, no network.
@@ -25,6 +26,7 @@ interface MockQuery extends PromiseLike<QueryResponse> {
   insert: (...args: unknown[]) => MockQuery;
   update: (...args: unknown[]) => MockQuery;
   eq: (...args: unknown[]) => MockQuery;
+  in: (...args: unknown[]) => MockQuery;
   is: (...args: unknown[]) => MockQuery;
   not: (...args: unknown[]) => MockQuery;
   order: (...args: unknown[]) => MockQuery;
@@ -46,7 +48,17 @@ vi.mock("@/lib/supabase/client", () => ({
 }));
 
 import { signIn } from "./auth";
-import { createCase, getCase, listCases } from "./cases";
+import {
+  applyCaseFilters,
+  archiveCase,
+  bulkArchive,
+  compareCasesBy,
+  createCase,
+  getCase,
+  listCases,
+  softDeleteCase,
+  toggleFavorite,
+} from "./cases";
 
 const calls: RecordedCall[] = [];
 const responses = new Map<string, QueryResponse[]>();
@@ -82,6 +94,7 @@ function buildQuery(call: RecordedCall): MockQuery {
     insert: step("insert"),
     update: step("update"),
     eq: step("eq"),
+    in: step("in"),
     is: step("is"),
     not: step("not"),
     order: step("order"),
@@ -385,5 +398,448 @@ describe("supabase driver", () => {
     const read = calls.find((call) => call.table === "cases");
     expect(String(read?.steps[0]?.args[0])).toContain("responsable");
     expect(String(read?.steps[0]?.args[0])).toContain("etapa:case_stages(name)");
+  });
+
+  it("listCases({archivedView:true}) switches the server-side partition", async () => {
+    // What the server actually returns for this partition: an archived row.
+    queueResponse("cases", {
+      data: [{ ...CASE_ROW, archivado: true }],
+      error: null,
+    });
+
+    const rows = await listCases({ archivedView: true });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.archived).toBe(true);
+
+    // The ONLY server-side filter: eq(archivado) instead of the default
+    // not(archivado); the deleted_at guard and the order stay identical.
+    const read = calls.find((call) => call.table === "cases");
+    expect(read?.steps).toContainEqual({ name: "eq", args: ["archivado", true] });
+    expect(read?.steps.some((step) => step.name === "not")).toBe(false);
+    expect(read?.steps).toContainEqual({ name: "is", args: ["deleted_at", null] });
+    expect(read?.steps).toContainEqual({
+      name: "order",
+      args: ["last_activity_at", { ascending: false }],
+    });
+  });
+
+  it("listCases narrows the in-memory predicates after the fetch", async () => {
+    queueResponse("cases", { data: [CASE_ROW, SPARSE_CASE_ROW], error: null });
+
+    // CASE_ROW is `Trámite` + favorite; SPARSE is `""` + not favorite.
+    const rows = await listCases({ etapa: "Trámite", favoritoOnly: true });
+    expect(rows.map((row) => row.id)).toEqual(["case-a"]);
+
+    queueResponse("cases", { data: [CASE_ROW, SPARSE_CASE_ROW], error: null });
+    const none = await listCases({ etapa: "Prueba", tipo: "Extrajudicial" });
+    expect(none).toEqual([]);
+
+    // The fetch itself stayed unfiltered: one read, all narrowing in memory.
+    const reads = calls.filter((call) => call.table === "cases");
+    expect(reads).toHaveLength(2);
+    expect(reads.every((read) => read.steps[0]?.name === "select")).toBe(true);
+  });
+
+  it("toggleFavorite patches only favorito and validates the row", async () => {
+    queueResponse("cases", { data: [{ ...CASE_ROW, favorito: true }], error: null });
+
+    const updated = await toggleFavorite("case-a", true);
+    expect(updated.favorite).toBe(true);
+
+    const write = calls.find((call) => call.table === "cases");
+    expect(write?.steps[0]).toEqual({ name: "update", args: [{ favorito: true }] });
+    expect(write?.steps).toContainEqual({ name: "eq", args: ["id", "case-a"] });
+    expect(write?.steps).toContainEqual({
+      name: "is",
+      args: ["deleted_at", null],
+    });
+
+    // RLS/unknown id answers 0 rows → the typed failure, never a silent no-op.
+    queueResponse("cases", { data: [], error: null });
+    await expect(toggleFavorite("missing", false)).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+
+  it("archiveCase patches archivado with the same narrow shape", async () => {
+    queueResponse("cases", { data: [{ ...CASE_ROW, archivado: true }], error: null });
+
+    const archived = await archiveCase("case-a", true);
+    expect(archived.archived).toBe(true);
+
+    const write = calls.find((call) => call.table === "cases");
+    expect(write?.steps[0]).toEqual({ name: "update", args: [{ archivado: true }] });
+    expect(write?.steps).toContainEqual({ name: "eq", args: ["id", "case-a"] });
+
+    queueResponse("cases", { data: [], error: null });
+    await expect(archiveCase("missing", false)).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+
+  it("bulkArchive sends one in() update and checks the affected count", async () => {
+    queueResponse("cases", { data: [CASE_ROW, SPARSE_CASE_ROW], error: null });
+
+    const rows = await bulkArchive(["case-a", "case-b"], true);
+    expect(rows.map((row) => row.id)).toEqual(["case-a", "case-b"]);
+
+    const write = calls.find((call) => call.table === "cases");
+    expect(write?.steps[0]).toEqual({ name: "update", args: [{ archivado: true }] });
+    expect(write?.steps).toContainEqual({
+      name: "in",
+      args: ["id", ["case-a", "case-b"]],
+    });
+    expect(write?.steps).toContainEqual({ name: "is", args: ["deleted_at", null] });
+
+    // Fewer rows back than ids sent (unknown/RLS-hidden id) → typed error.
+    queueResponse("cases", { data: [CASE_ROW], error: null });
+    await expect(bulkArchive(["case-a", "case-b"], true)).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+
+  it("bulkArchive rejects an empty id list before any query", async () => {
+    await expect(bulkArchive([], true)).rejects.toMatchObject({
+      code: "missing_fields",
+    });
+    expect(calls.filter((call) => call.table === "cases")).toHaveLength(0);
+  });
+
+  it("softDeleteCase stamps deleted_at and validates the row", async () => {
+    queueResponse("cases", { data: [{ id: "case-a" }], error: null });
+
+    await expect(softDeleteCase("case-a")).resolves.toBeUndefined();
+
+    const write = calls.find((call) => call.table === "cases");
+    const payload = write?.steps[0]?.args[0] as { deleted_at: string };
+    expect(write?.steps[0]?.name).toBe("update");
+    expect(typeof payload.deleted_at).toBe("string");
+    expect(Number.isNaN(Date.parse(payload.deleted_at))).toBe(false);
+    expect(write?.steps).toContainEqual({ name: "eq", args: ["id", "case-a"] });
+    expect(write?.steps).toContainEqual({
+      name: "is",
+      args: ["deleted_at", null],
+    });
+
+    queueResponse("cases", { data: [], error: null });
+    await expect(softDeleteCase("missing")).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+});
+
+/* --------------------------------------------------------------- pure ---- */
+
+function makeCase(overrides: Partial<StudyCase> & { id: string }): StudyCase {
+  return {
+    studyId: "study-9",
+    caratula: "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos",
+    numero: "90.111/2026",
+    fuero: "Civil y Comercial",
+    jurisdiccion: "Ciudad Autónoma de Buenos Aires",
+    juzgado: "Juzgado Civil y Comercial N° 4",
+    etapa: "Trámite",
+    tipo: "Judicial",
+    responsable: "Ana Beltrán",
+    favorite: false,
+    archived: false,
+    createdAt: "2026-11-05T12:00:00.000Z",
+    lastActivityAt: "2026-11-13T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** Three rows covering every filter vocabulary the panel offers. */
+const FILTER_ROWS: StudyCase[] = [
+  makeCase({ id: "row-a", favorite: true }),
+  makeCase({
+    id: "row-b",
+    caratula: "Sucesión de Ferrari, Juan",
+    numero: "",
+    fuero: "Sucesiones",
+    jurisdiccion: "Provincia de Buenos Aires",
+    etapa: "Cita",
+    responsable: "Luis Duarte",
+    lastActivityAt: "2026-11-10T10:15:00.000Z",
+  }),
+  makeCase({
+    id: "row-c",
+    caratula: "Acme S.A. s/ quiebra",
+    fuero: "Contencioso Administrativo",
+    tipo: "Extrajudicial",
+    etapa: "Inicial",
+    responsable: "ana beltrán",
+    archived: true,
+    createdAt: "2026-11-01T09:00:00.000Z",
+  }),
+];
+
+describe("applyCaseFilters (pure predicates)", () => {
+  it("defaults to the active partition only", () => {
+    expect(applyCaseFilters(FILTER_ROWS).map((row) => row.id)).toEqual([
+      "row-a",
+      "row-b",
+    ]);
+  });
+
+  it("archivedView keeps ONLY archived rows", () => {
+    expect(
+      applyCaseFilters(FILTER_ROWS, { archivedView: true }).map((row) => row.id),
+    ).toEqual(["row-c"]);
+  });
+
+  it("favoritoOnly keeps starred rows", () => {
+    expect(
+      applyCaseFilters(FILTER_ROWS, { favoritoOnly: true }).map((row) => row.id),
+    ).toEqual(["row-a"]);
+  });
+
+  it("tipo matches the vocabulary exactly", () => {
+    expect(
+      applyCaseFilters(FILTER_ROWS, { tipo: "Extrajudicial" }).map((row) => row.id),
+    ).toEqual([]);
+    expect(
+      applyCaseFilters(
+        [...FILTER_ROWS, makeCase({ id: "row-d", tipo: "Extrajudicial" })],
+        { tipo: "Extrajudicial" },
+      ).map((row) => row.id),
+    ).toEqual(["row-d"]);
+  });
+
+  it("fuero, etapa and jurisdiccion match their display values", () => {
+    expect(
+      applyCaseFilters(FILTER_ROWS, { fuero: "Sucesiones" }).map((row) => row.id),
+    ).toEqual(["row-b"]);
+    expect(
+      applyCaseFilters(FILTER_ROWS, { etapa: "Cita" }).map((row) => row.id),
+    ).toEqual(["row-b"]);
+    expect(
+      applyCaseFilters(FILTER_ROWS, {
+        jurisdiccion: "Provincia de Buenos Aires",
+      }).map((row) => row.id),
+    ).toEqual(["row-b"]);
+  });
+
+  it("responsable matches case-insensitively and accent-insensitively", () => {
+    expect(
+      applyCaseFilters(FILTER_ROWS, { responsable: "ANA BELTRÁN" }).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["row-a"]);
+    // No accent in the needle: foldForSearch strips it on both sides.
+    expect(
+      applyCaseFilters(FILTER_ROWS, { responsable: "beltran" }).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["row-a"]);
+    expect(
+      applyCaseFilters(FILTER_ROWS, { responsable: "luis" }).map((row) => row.id),
+    ).toEqual(["row-b"]);
+  });
+
+  it("query rides on the accent/typo-tolerant search", () => {
+    expect(
+      applyCaseFilters(FILTER_ROWS, { query: "gomez" }).map((row) => row.id),
+    ).toEqual(["row-a"]);
+    expect(
+      applyCaseFilters(FILTER_ROWS, { query: "ferrai" }).map((row) => row.id),
+    ).toEqual(["row-b"]);
+    expect(
+      applyCaseFilters(FILTER_ROWS, { query: "zzzzzz" }).map((row) => row.id),
+    ).toEqual([]);
+  });
+
+  it("combines every predicate with AND semantics", () => {
+    const combined = applyCaseFilters(FILTER_ROWS, {
+      etapa: "Trámite",
+      fuero: "Civil y Comercial",
+      tipo: "Judicial",
+      jurisdiccion: "Ciudad Autónoma de Buenos Aires",
+      responsable: "ana",
+      favoritoOnly: true,
+      query: "gomez",
+    });
+    expect(combined.map((row) => row.id)).toEqual(["row-a"]);
+
+    // One extra predicate turns the match into a miss — never an OR.
+    expect(
+      applyCaseFilters(FILTER_ROWS, {
+        etapa: "Trámite",
+        favoritoOnly: true,
+        responsable: "luis",
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("compareCasesBy (sort comparators)", () => {
+  const older = makeCase({
+    id: "older",
+    caratula: "Alfa, Juan c/ Beta s/ daños",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    lastActivityAt: "2026-01-01T00:00:00.000Z",
+  });
+  const newer = makeCase({
+    id: "newer",
+    caratula: "Zeta, Ana c/ Ñandú s/ despido",
+    createdAt: "2026-06-01T00:00:00.000Z",
+    lastActivityAt: "2025-06-01T00:00:00.000Z",
+  });
+
+  it("caratula sorts alphabetically and desc flips the order", () => {
+    expect(
+      [newer, older].sort(compareCasesBy("caratula", "asc")).map((row) => row.id),
+    ).toEqual(["older", "newer"]);
+    expect(
+      [newer, older].sort(compareCasesBy("caratula", "desc")).map((row) => row.id),
+    ).toEqual(["newer", "older"]);
+  });
+
+  it("fecha orders by createdAt", () => {
+    expect(
+      [newer, older].sort(compareCasesBy("fecha", "asc")).map((row) => row.id),
+    ).toEqual(["older", "newer"]);
+    expect(
+      [newer, older].sort(compareCasesBy("fecha", "desc")).map((row) => row.id),
+    ).toEqual(["newer", "older"]);
+  });
+
+  it("ultima_actividad desc puts the newest activity first (S07 default)", () => {
+    // older has the LATER activity here: desc must surface it first.
+    expect(
+      [newer, older]
+        .sort(compareCasesBy("ultima_actividad", "desc"))
+        .map((row) => row.id),
+    ).toEqual(["older", "newer"]);
+    expect(
+      [newer, older]
+        .sort(compareCasesBy("ultima_actividad", "asc"))
+        .map((row) => row.id),
+    ).toEqual(["newer", "older"]);
+  });
+});
+
+/* ----------------------------------------------------- fake mutations ---- */
+
+describe("fake driver case mutations", () => {
+  // The fake store holds the seed OBJECTS themselves (`[...seedCases]` is a
+  // shallow copy), so in-place patches poison every later rebuild in this
+  // file. Snapshot the two mutable flags at import time, restore per test.
+  const SEED_FLAGS = new Map(
+    seedCases.map((row) => [row.id, { favorite: row.favorite, archived: row.archived }]),
+  );
+
+  beforeEach(async () => {
+    resetDataStore();
+    for (const row of getStore().cases) {
+      const flags = SEED_FLAGS.get(row.id);
+      if (flags) {
+        row.favorite = flags.favorite;
+        row.archived = flags.archived;
+      }
+    }
+    const signed = await signIn({
+      email: seedUser.email,
+      password: seedDemoPassword,
+    });
+    if (!signed.ok) throw new Error("demo signIn failed");
+  });
+
+  it("toggleFavorite flips favorito and repeats are a no-op success", async () => {
+    const [first] = await listCases();
+    expect(first).toBeDefined();
+
+    const on = await toggleFavorite(first!.id, true);
+    expect(on.favorite).toBe(true);
+    // Idempotent: setting the value the row already has still succeeds.
+    expect((await toggleFavorite(first!.id, true)).favorite).toBe(true);
+    expect((await toggleFavorite(first!.id, false)).favorite).toBe(false);
+
+    await expect(toggleFavorite("case-missing", true)).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+
+  it("archiveCase moves the row between the default and archived views", async () => {
+    const [first] = await listCases();
+
+    await archiveCase(first!.id, true);
+    expect((await listCases()).some((row) => row.id === first!.id)).toBe(false);
+    expect(
+      (await listCases({ archivedView: true })).map((row) => row.id),
+    ).toEqual([first!.id]);
+
+    await archiveCase(first!.id, false);
+    expect((await listCases()).some((row) => row.id === first!.id)).toBe(true);
+    expect(await listCases({ archivedView: true })).toEqual([]);
+
+    await expect(archiveCase("case-missing", true)).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+
+  it("bulkArchive validates every id before writing (atomic)", async () => {
+    const rows = await listCases();
+
+    await expect(
+      bulkArchive([rows[0]!.id, "case-missing"], true),
+    ).rejects.toMatchObject({ code: "save_failed" });
+
+    // No half-write: the known id stayed exactly where it was.
+    expect((await listCases()).map((row) => row.id)).toContain(rows[0]!.id);
+    expect(await listCases({ archivedView: true })).toEqual([]);
+  });
+
+  it("bulkArchive of already-archived rows is a no-op success", async () => {
+    const rows = await listCases();
+    const ids = rows.map((row) => row.id);
+
+    const first = await bulkArchive(ids, true);
+    expect(first).toHaveLength(ids.length);
+    const again = await bulkArchive(ids, true);
+    expect(again).toHaveLength(ids.length);
+
+    expect(await listCases()).toEqual([]);
+    expect(await listCases({ archivedView: true })).toHaveLength(ids.length);
+
+    await expect(bulkArchive([], true)).rejects.toMatchObject({
+      code: "missing_fields",
+    });
+  });
+
+  it("softDeleteCase removes the row from every read", async () => {
+    const [first] = await listCases();
+
+    await softDeleteCase(first!.id);
+
+    expect((await listCases()).some((row) => row.id === first!.id)).toBe(false);
+    expect(await getCase(first!.id)).toBeNull();
+    expect(
+      (await listCases({ archivedView: true })).some(
+        (row) => row.id === first!.id,
+      ),
+    ).toBe(false);
+
+    await expect(softDeleteCase("case-missing")).rejects.toMatchObject({
+      code: "save_failed",
+    });
+  });
+
+  it("listCases applies favoritoOnly and the archived partition", async () => {
+    const rows = await listCases();
+    // Seed row 1 is the favorite one (lib/seed.ts).
+    expect(
+      (await listCases({ favoritoOnly: true })).map((row) => row.id),
+    ).toEqual([rows[0]!.id]);
+
+    await archiveCase(rows[0]!.id, true);
+    expect(
+      (await listCases({ archivedView: true, favoritoOnly: true })).map(
+        (row) => row.id,
+      ),
+    ).toEqual([rows[0]!.id]);
+    expect(
+      await listCases({ archivedView: true, favoritoOnly: true, etapa: "Prueba" }),
+    ).toEqual([]);
   });
 });
