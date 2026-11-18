@@ -260,29 +260,33 @@ test.describe("F02 case list and detail", () => {
   }) => {
     const guard = guardPage(page);
     await page.goto("/expedientes");
-    // The list must be loaded before tabbing, or the60 presses only walk
+    // The list must be loaded before tabbing, or the presses only walk
     // the sidebar (flaky otherwise).
     await expect(page.getByRole("link", { name: SEED.caseGomez })).toBeVisible();
 
+    // Target ANY row's carátula link (/expedientes/{uuid}), never the
+    // sidebar (/expedientes) or the create form (/expedientes/nueva).
+    // The stop budget counts up to the FIRST row: S07 rows add three
+    // controls each (checkbox, star, ⋯ menu) and the dev database may
+    // carry rows from earlier runs, so pinning a row index would only
+    // re-break as the list grows.
     const reached = await tabUntil(
       page,
       () => {
-        // Must be the ANCHOR itself — body.textContent contains the
-        // carátula too, which would make this predicate pass instantly.
         const el = document.activeElement as HTMLAnchorElement | null;
-        return (
-          el?.tagName === "A" &&
-          (el.textContent ?? "").includes("Gómez, Rosa")
-        );
+        if (el?.tagName !== "A") return false;
+        const href = el.getAttribute("href") ?? "";
+        return /^\/expedientes\/[0-9a-f-]{36}$/i.test(href);
       },
       60,
     );
     expect(reached, "carátula link reachable by keyboard").toBe(true);
+    const caratula = await page.evaluate(
+      () => (document.activeElement as HTMLAnchorElement).textContent ?? "",
+    );
     await page.keyboard.press("Enter");
 
-    await expect(
-      page.getByRole("heading", { name: SEED.caseGomez }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: caratula })).toBeVisible();
     await expectNoAxeViolations(page, "detail via keyboard (F02-E14/E15)");
     await guard.assertClean();
   });
