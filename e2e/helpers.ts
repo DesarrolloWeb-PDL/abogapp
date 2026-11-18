@@ -41,6 +41,17 @@ let envCache: Record<string, string> | null = null;
 
 /** Reads .env.local (test process only — never shipped to the browser). */
 export function envLocal(key: string): string {
+  const value = optionalEnv(key);
+  if (!value) throw new Error(`missing ${key} in .env.local`);
+  return value;
+}
+
+/**
+ * Same file, but optional: returns null when the variable is absent or
+ * empty. Used by specs whose expectation depends on how the local project
+ * is configured (e.g. the WhatsApp access token is not issued yet).
+ */
+export function optionalEnv(key: string): string | null {
   if (!envCache) {
     const raw = readFileSync(path.resolve(__dirname, "..", ".env.local"), "utf8");
     envCache = {};
@@ -49,9 +60,7 @@ export function envLocal(key: string): string {
       if (match) envCache[match[1]] = match[2];
     }
   }
-  const value = envCache[key];
-  if (!value) throw new Error(`missing ${key} in .env.local`);
-  return value;
+  return envCache[key] || null;
 }
 
 /* ------------------------------------------------------------- guards ---- */

@@ -447,3 +447,167 @@ supabase upsert-defaults with a mocked client; fake-driver parity) and
 save → signed webhook → the new greeting in the inbox thread; skips with a
 printed reason until the migration is applied; restores the defaults in
 `finally`).
+
+---
+
+## 8. Outbound delivery — WhatsApp Unit 2
+
+The reply the bot already stored locally is now delivered through the Meta
+Graph API, the 24 h window gates the send, and Meta's delivery receipts
+come back onto the same row.
+
+### Sender — `lib/supabase/wa-graph.ts`
+
+- `sendWhatsAppText({ to, type: "text", text })` POSTs to
+  `https://graph.facebook.com/{WHATSAPP_API_VERSION|v21.0}/{WHATSAPP_PHONE_NUMBER_ID}/messages`
+  with `Authorization: Bearer {WHATSAPP_ACCESS_TOKEN}` and the body
+  `{ messaging_product: "whatsapp", to, type: "text", text: { body } }`.
+  `to` is the wa_id (digits only): the webhook stores E.164 with `+`
+  because of `wa_contacts_phone_e164_check`, and `toWaId()` strips it on
+  the way out.
+- Plain `fetch`, ~10 s abort, no SDK.
+- **Never throws.** Every failure is `{ ok: false, reason }` with a typed
+  reason: `not_configured | outside_window | rate_limited |
+  invalid_recipient | timeout | network_error | api_error`.
+- **Config guard:** without `WHATSAPP_ACCESS_TOKEN` or
+  `WHATSAPP_PHONE_NUMBER_ID` the sender answers `not_configured` before
+  any network I/O and logs once per process. The webhook keeps working
+  inbox-only — the reply is stored, the send is recorded as failed with
+  that reason, nothing fails. This is the state until the real token
+  arrives.
+- `.env.example` documents `WHATSAPP_ACCESS_TOKEN`,
+  `WHATSAPP_PHONE_NUMBER_ID` and the optional `WHATSAPP_API_VERSION`
+  (default `v21.0`), with no values. Secrets stay server-side: the module
+  is reached only from the webhook path and never lands in a client bundle.
+
+### Graph error mapping (by numeric `code`, as Meta recommends)
+
+| code | meaning (Meta's error table) | reason |
+| --- | --- | --- |
+| 131047 | more than 24 h since the recipient last replied | `outside_window` |
+| 131026 | unable to deliver (not on WhatsApp / old app / no ToS) | `invalid_recipient` |
+| 131021 | sender and recipient are the same number | `invalid_recipient` |
+| 130429, 131056, HTTP 429 | rate limit | `rate_limited` |
+| anything else (incl. bad token, 5xx) | — | `api_error` |
+
+**Correction against the unit brief:** the brief listed 131026 as the
+"recipient outside the 24 h window" code. Meta's table says the opposite —
+the window rejection is **131047**, while 131026 is *Message
+Undeliverable*. Labeling 131026 as the window would paint `Fuera de
+ventana` over a number that simply cannot receive WhatsApp messages, so
+each code maps to its real meaning; both still end as a recorded typed
+failure. Source: `developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes`.
+
+### Window rule (flow 9)
+
+- Every inbound delivery stamps `wa_conversations.last_inbound_at = now()`
+  (and `window_expires_at = now + 24 h`) — that write has existed since
+  T8; Unit 2 only relies on it.
+- `withinWindow(conversation, now?)` implements
+  `now - last_inbound_at <= 24 h`, falling back to `window_expires_at` and
+  answering `false` when neither exists (a conversation that never
+  received a message has no window).
+- The gate lives in exactly one place: `deliverOutbound(message,
+  conversation, { sender?, supabase? })`. The bot's reply is inside the
+  window by construction (it was just stamped), so the gate exists for
+  human/late replies — outside it **no Graph call is made** (Meta would
+  answer 131047 anyway) and the row is marked `failed` +
+  `error = outside_window`.
+- A delivery failure never fails the webhook: the row already holds the
+  reply, the outcome is written back as `status` + `error`, and the
+  handler still acknowledges Meta with a 200 (a 500 would make Meta retry
+  the same delivery forever).
+
+### Statuses
+
+`wa_messages` already carried everything this unit needs — **no
+migration**: `provider_message_id text`,
+`status text check (in ('received','sent','delivered','read','failed'))`,
+`error text`, `payload jsonb`.
+
+- **On send:** the outbound row is inserted first — with the exact Graph
+  body in `payload`, recorded *before* the attempt as an audit trail —
+  and then updated. Graph ack → `status = sent` +
+  `provider_message_id = <wamid>`; failure → `status = failed` +
+  `error = <reason token>`. The insert starts at `failed` because the
+  check constraint has no `pending`/`unsent` value and a row Meta has not
+  confirmed must not claim `sent`; `deliverOutbound` overwrites it within
+  the same request (adding a `pending` value would need a migration this
+  unit does not require).
+- **Receipts:** `parseStatusUpdates()` (`lib/data/webhook.ts`) reads
+  `entry[].changes[].value.statuses[]`;
+  `processStatusUpdatesMeta()` applies them, matching on
+  `provider + direction = out + provider_message_id`. Idempotent on
+  `${id}:${status}` through the same `wa_webhook_events` claim/release
+  gate as inbound messages, and the counts fold into the route's existing
+  `accepted` / `duplicates`, so the response shape is unchanged. `sent`,
+  `delivered` and `read` therefore arrive with no further work.
+- One vocabulary in `wa_messages.error`: the typed reason tokens above —
+  including Meta's async `failed` receipts, whose code goes through the
+  same `mapGraphErrorCode()` table (e.g. 131047 → `outside_window`).
+
+### Status chip in A01 — NOT shipped (TODO)
+
+The schema has the status column, but A01 in M1 renders **only the
+conversation list**: there is no thread pane and no message bubble to
+attach a delivery chip to, and neither `WaConversation` nor
+`listConversationsSupabase` carries message-level status. Wiring it
+through `GET /api/wa/conversations` would touch files outside this unit's
+surfaces and would redesign the list row (§4 places the chip on the
+message bubble, component 25). The chip ships with the thread pane; the
+copy is ready:
+
+| state | `wa_messages` | chip |
+| --- | --- | --- |
+| ack from Meta | `sent` / `delivered` / `read` | `Enviado` |
+| any failure reason, incl. `not_configured` (today's state) | `failed` ≠ `outside_window` | `Falló` |
+| outside the 24 h window | `failed` + `error = outside_window` | `Fuera de ventana` |
+
+### Tests
+
+- `lib/supabase/wa-graph.test.ts` (29) — URL/headers/body and the wa_id
+  normalisation; `WHATSAPP_API_VERSION` override; `not_configured` never
+  touches the network and logs once per process; error mapping (131047 →
+  `outside_window`, 131026 → `invalid_recipient`, 429/130429 →
+  `rate_limited`, unknown → `api_error`, abort → `timeout`, refused
+  connection → `network_error`); the `withinWindow` table (inside, exact
+  24 h boundary, outside, derived from `window_expires_at`, never-inbound,
+  garbage timestamps); `deliverOutbound` (inside → sender called + row
+  `sent` with Meta's id, outside → sender not called + `outside_window`,
+  a throwing sender and a failing status write both resolve); the
+  pipeline (window stamp, stored payload equals the Graph body, sender
+  arguments, ack write-back, duplicate delivery); `parseStatusUpdates`;
+  `processStatusUpdatesMeta` (delivered, duplicate no-op, failed → typed
+  reason, status-free payload touches nothing). `fetch` is stubbed — no
+  live network anywhere.
+- `e2e/w05-outbound.spec.ts` (2) — H1: signed webhook → stored reply with
+  `status = failed`, `error = not_configured` and the byte-identical Graph
+  payload (`to` without `+`), the inbox row still rendering it, and **zero**
+  attempts against `graph.facebook.com` (a browser route is registered
+  with a canned ack as a safety net). H2: seed an outbound row carrying a
+  Meta id → signed `statuses` delivery → `delivered`; the same delivery
+  again → counted duplicate, no rewrite; `failed` + 131026 →
+  `invalid_recipient`; rows removed in `finally`. H1 skips itself once
+  `WHATSAPP_ACCESS_TOKEN` exists in `.env.local`.
+
+### Scope notes / TODO(gap)
+
+- **Template sends = phase 2** (flow 9.3/9.4): outside the window only
+  approved utility/marketing templates may go out; `template_name` is
+  already on the table and nothing in this unit sends one.
+- **No human reply route yet** (`POST /api/wa/conversations/:id/reply`):
+  M1 has no composer, so the only sender today is the bot. The gate is
+  ready for it.
+- **A01 window chip + composer lock (components 29/30) and the
+  `wa-window-watch` job**: not built — same reason as the status chip.
+- **The fake data driver does not send**: `handleInboundMessage` keeps
+  storing replies in memory (it has no `wa_messages` rows); Graph delivery
+  is the supabase driver's job.
+- **No retry/backoff**: a failed send is recorded once (WA-022's
+  "Reintentar" belongs to the member) — never a retry storm.
+- **e2e cannot intercept the server-side Graph call**: Playwright routes
+  only see browser-context requests, while the send runs inside the Next
+  server process, and `.env.local` carries no token. H1 therefore asserts
+  the recorded payload (the same builder produces the wire body) plus the
+  absence of any attempt; the request shape itself is covered by the
+  stubbed-`fetch` unit tests.

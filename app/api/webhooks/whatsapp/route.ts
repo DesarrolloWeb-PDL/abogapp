@@ -1,21 +1,34 @@
 import type { NextRequest } from "next/server";
-import { processInboundPayload, verifyHubSignature } from "@/lib/data";
+import {
+  processInboundPayload,
+  verifyHubSignature,
+  type WebhookProcessResult,
+} from "@/lib/data";
 import { getDataDriver } from "@/lib/data/driver";
-import { processInboundMeta } from "@/lib/supabase/meta-webhook";
+import {
+  processInboundMeta,
+  processStatusUpdatesMeta,
+} from "@/lib/supabase/meta-webhook";
 
 /**
  * Meta WhatsApp Business Cloud API webhook (Module A — assumption).
  *
  * T8: GET performs the verification handshake, POST authenticates the
  * delivery with X-Hub-Signature-256 and stores each event exactly once.
- * The Graph API call that would deliver our reply to the client is not made
- * here — M1 makes no Meta calls at all; the reply lives in the inbox.
+ * Unit 2 adds outbound delivery: the Graph API call itself is made inside
+ * `processInboundMeta` (lib/supabase/meta-webhook.ts → lib/supabase/
+ * wa-graph.ts), never here — this route only parses, dispatches and
+ * acknowledges. The send is skipped entirely when WHATSAPP_ACCESS_TOKEN /
+ * WHATSAPP_PHONE_NUMBER_ID are absent, so the app keeps working inbox-only.
  *
  * Driver split (both paths idempotent on the event key):
- *  - fake    → in-memory store via processInboundPayload;
+ *  - fake    → in-memory store via processInboundPayload (no Graph sends,
+ *    no status machinery: the fake layer has no wa_messages rows);
  *  - supabase→ service-role writes into wa_webhook_events / wa_* rows via
- *    processInboundMeta (lib/supabase/meta-webhook.ts). The service-role key
- *    is read here, server-side only — never exposed to a client bundle.
+ *    processInboundMeta and, for Meta's `statuses` deliveries,
+ *    processStatusUpdatesMeta (lib/supabase/meta-webhook.ts). The
+ *    service-role key is read here, server-side only — never exposed to a
+ *    client bundle.
  *
  * No hardcoded fallbacks: both secrets come from the environment and the
  * route refuses to answer without them (see `.env.example`).
@@ -66,11 +79,23 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "invalid_payload" }, { status: 400 });
   }
 
-  // Store + bot reply. Duplicates (Meta retries) are dropped inside.
-  const result =
-    getDataDriver() === "supabase"
-      ? await processInboundMeta(payload)
-      : await processInboundPayload(payload);
+  // Store + bot reply + delivery outcome. Duplicates (Meta retries) are
+  // dropped inside both halves: the `statuses` delivery (sent/delivered/
+  // read/failed) updates the outbound row it names, then any inbound
+  // message is stored and answered. Counts are folded into the same
+  // `accepted` / `duplicates` numbers Meta already sees.
+  let result: WebhookProcessResult;
+  if (getDataDriver() === "supabase") {
+    const statuses = await processStatusUpdatesMeta(payload);
+    const inbound = await processInboundMeta(payload);
+    result = {
+      accepted: inbound.accepted + statuses.applied,
+      duplicates: inbound.duplicates + statuses.duplicates,
+      replies: inbound.replies,
+    };
+  } else {
+    result = await processInboundPayload(payload);
+  }
 
   // Meta retries until it sees a 200 — always acknowledge a valid delivery.
   return Response.json({

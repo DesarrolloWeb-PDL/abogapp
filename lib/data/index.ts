@@ -82,10 +82,13 @@ export { nonWorkingDays } from "./calendar";
 // WhatsApp webhook (T8) — signature, payload parsing and the idempotent loop.
 export {
   parseInboundMessages,
+  parseStatusUpdates,
   processInboundPayload,
   verifyHubSignature,
   type ParsedInbound,
+  type ParsedStatusUpdate,
   type ProcessInboundOptions,
+  type WaDeliveryStatus,
   type WebhookProcessResult,
 } from "./webhook";
 export { markEventProcessed, releaseEventKey } from "./whatsapp";

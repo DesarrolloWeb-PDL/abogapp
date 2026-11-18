@@ -93,6 +93,102 @@ export function parseInboundMessages(payload: unknown): ParsedInbound[] {
   return parsed;
 }
 
+/** Delivery states Meta reports for OUR outbound messages. */
+export type WaDeliveryStatus = "sent" | "delivered" | "read" | "failed";
+
+/** One `entry[].changes[].value.statuses[]` record from Meta. */
+export interface ParsedStatusUpdate {
+  /** Idempotency key: `${messageId}:${status}` (Meta re-delivers). */
+  eventKey: string;
+  /** Meta's outbound id → matched against `wa_messages.provider_message_id`. */
+  messageId: string;
+  status: WaDeliveryStatus;
+  /** Meta's epoch seconds, kept verbatim for the server log. */
+  timestamp: string;
+  recipientId?: string;
+  /** First error code when `status === "failed"`. */
+  errorCode?: number;
+  errorDetail?: string;
+}
+
+/** The `wa_messages.status` values Meta can move a row to (`received` is
+ *  inbound-only, so it is never produced by a status update). */
+const DELIVERY_STATUSES: WaDeliveryStatus[] = [
+  "sent",
+  "delivered",
+  "read",
+  "failed",
+];
+
+/**
+ * Parses the `statuses` half of a Meta delivery (the mirror image of
+ * `parseInboundMessages`: those read `value.messages[]`, these read
+ * `value.statuses[]`). A payload may carry both halves, or only one —
+ * each parser returns `[]` for the half it does not find, so the route can
+ * run both without inspecting the shape itself.
+ */
+export function parseStatusUpdates(payload: unknown): ParsedStatusUpdate[] {
+  if (typeof payload !== "object" || payload === null) return [];
+  const entries = (payload as { entry?: unknown }).entry;
+  if (!Array.isArray(entries)) return [];
+
+  const parsed: ParsedStatusUpdate[] = [];
+  for (const entry of entries) {
+    const changes = (entry as { changes?: unknown }).changes;
+    if (!Array.isArray(changes)) continue;
+    for (const change of changes) {
+      const value = (change as { value?: unknown }).value;
+      const statuses = (value as { statuses?: unknown } | undefined)?.statuses;
+      if (!Array.isArray(statuses)) continue;
+      for (const status of statuses) {
+        const record = status as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id : null;
+        const state = record.status;
+        if (
+          !id ||
+          typeof state !== "string" ||
+          !DELIVERY_STATUSES.includes(state as WaDeliveryStatus)
+        ) {
+          continue;
+        }
+        const errors: unknown[] = Array.isArray(record.errors)
+          ? record.errors
+          : [];
+        const firstError = errors.find(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as { code?: unknown }).code === "number",
+        ) as
+          | {
+              code?: number;
+              message?: string;
+              title?: string;
+              error_data?: { details?: string };
+            }
+          | undefined;
+        parsed.push({
+          eventKey: `${id}:${state}`,
+          messageId: id,
+          status: state as WaDeliveryStatus,
+          timestamp:
+            typeof record.timestamp === "string" ? record.timestamp : "",
+          recipientId:
+            typeof record.recipient_id === "string"
+              ? record.recipient_id
+              : undefined,
+          errorCode: firstError?.code,
+          errorDetail:
+            firstError?.error_data?.details ??
+            firstError?.message ??
+            firstError?.title,
+        });
+      }
+    }
+  }
+  return parsed;
+}
+
 export interface WebhookProcessResult {
   /** Fresh events stored (and answered by the bot). */
   accepted: number;
