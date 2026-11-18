@@ -1,5 +1,16 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_BOT_SETTINGS, GREETING_REPLY, decideBotReply } from "./bot";
+import {
+  DEFAULT_BOT_SETTINGS,
+  DEFAULT_REPLY,
+  GREETING_REPLY,
+  decideBotReply,
+} from "./bot";
+import {
+  LLM_DISCLAIMER,
+  LLM_USER_MAX_CHARS,
+  resolveBotReply,
+} from "./bot-llm";
 import {
   BOT_MESSAGE_MAX,
   getBotSettings,
@@ -327,5 +338,288 @@ describe("supabase driver (mocked client)", () => {
       offHours: "ok",
       handoff: "ok",
     });
+  });
+});
+
+/* ------------------------------------------------- LLM fallback (Unit 3) ---- */
+
+/**
+ * WhatsApp Unit 3 — `resolveBotReply`, the async wrapper that puts the LLM
+ * BEHIND the rules (fase 2 of whatsapp-bot.md). All stubbed: the model is an
+ * injected seam or a stubbed `fetch`, and every test pins `AI_API_KEY`
+ * explicitly so the config gate can never depend on the shell.
+ *
+ * Claims covered:
+ *  1. rules run FIRST — STOP / closed / disabled / greeting never reach the
+ *     model, and without `AI_API_KEY` the unknown intent keeps today's
+ *     default rule reply;
+ *  2. configured → ONE call with system prompt + WA-020 disclaimer + the
+ *     study's case context, and the reply ALWAYS carries the disclaimer
+ *     (appended client-side when the model omits it);
+ *  3. any model failure → the default rule reply (the bot never goes silent);
+ *  4. the inbound text is capped before it reaches the model, and a failing
+ *     case-context fetch degrades to an answer without context.
+ */
+describe("resolveBotReply — LLM fallback behind the rules", () => {
+  const LLM_STUDY = "study-llm-0001";
+  const UNKNOWN_INTENT = "¿Cuánto cuesta redactar un contrato de alquiler?";
+
+  /** Scripted Supabase double for the case-context read (no network). */
+  function contextClient(
+    options: {
+      studyName?: string | null;
+      cases?: string[];
+      /** Tables whose query answers an error instead of rows. */
+      failTables?: string[];
+      /** The whole client explodes (service client unavailable). */
+      explode?: boolean;
+    } = {},
+  ): SupabaseClient {
+    const from = (table: string): Record<string, unknown> => {
+      if (options.explode) throw new Error("service client unavailable");
+      const answer = (): Promise<{
+        data: unknown;
+        error: { message: string } | null;
+      }> => {
+        if (options.failTables?.includes(table)) {
+          return Promise.resolve({ data: null, error: { message: "boom" } });
+        }
+        if (table === "studies") {
+          return Promise.resolve({
+            data: options.studyName ? { name: options.studyName } : null,
+            error: null,
+          });
+        }
+        if (table === "cases") {
+          return Promise.resolve({
+            data: (options.cases ?? []).map((caratula, index) => ({
+              id: `case-${index}`,
+              caratula,
+            })),
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: null, error: null });
+      };
+      const builder: Record<string, unknown> = {};
+      for (const op of ["select", "eq", "is", "order", "limit"]) {
+        builder[op] = () => builder;
+      }
+      builder.maybeSingle = answer;
+      // List queries end with `await builder` — a thenable, like supabase-js.
+      builder.then = (
+        onFulfilled?: (value: unknown) => unknown,
+        onRejected?: (reason: unknown) => unknown,
+      ) => answer().then(onFulfilled, onRejected);
+      return builder;
+    };
+    return { from } as unknown as SupabaseClient;
+  }
+
+  const configuredEnv = () => {
+    vi.stubEnv("AI_API_KEY", "sk-test-llm");
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("without AI_API_KEY the unknown intent keeps the default rule reply", async () => {
+    vi.stubEnv("AI_API_KEY", "");
+    const ask = vi.fn();
+
+    const decision = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient({ studyName: "Estudio Rivera" }),
+      ask,
+    });
+
+    expect(decision).toEqual({ reply: DEFAULT_REPLY, nextStatus: "bot" });
+    expect(ask).not.toHaveBeenCalled();
+    expect(decision.reply).not.toContain("asesoramiento legal");
+  });
+
+  it("configured → one call with system + disclaimer + case context; reply carries the disclaimer", async () => {
+    configuredEnv();
+    const ask = vi.fn().mockResolvedValue({
+      ok: true,
+      text: "Redactamos contratos con revisión previa.",
+    });
+
+    const decision = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient({
+        studyName: "Estudio Beltrán & Asociados",
+        cases: ["Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos"],
+      }),
+      ask,
+    });
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    const input = ask.mock.calls[0][0] as {
+      system: string;
+      user: string;
+    };
+    // The system prompt: Spanish voseo assistant, the study, its cases and
+    // the WA-020 disclaimer it must always end with.
+    expect(input.system).toContain("Estudio Beltrán & Asociados");
+    expect(input.system).toContain(
+      "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos",
+    );
+    expect(input.system).toContain(LLM_DISCLAIMER);
+    expect(input.user).toBe(UNKNOWN_INTENT);
+    // The disclaimer is appended CLIENT-SIDE, so it survives a model that
+    // ignores the system prompt.
+    expect(decision.reply).toBe(
+      `Redactamos contratos con revisión previa.\n\n${LLM_DISCLAIMER}`,
+    );
+    expect(decision.nextStatus).toBe("bot");
+  });
+
+  it("does not duplicate the disclaimer when the model already wrote it", async () => {
+    configuredEnv();
+    const ask = vi.fn().mockResolvedValue({
+      ok: true,
+      text: `Solo orientación.\n\n${LLM_DISCLAIMER}`,
+    });
+
+    const decision = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient(),
+      ask,
+    });
+
+    expect(decision.reply).toBe(`Solo orientación.\n\n${LLM_DISCLAIMER}`);
+    const occurrences = decision.reply!.split(LLM_DISCLAIMER).length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("falls back to the default rule reply on timeout, api_error and a throwing seam", async () => {
+    configuredEnv();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = contextClient();
+
+    for (const failure of [
+      { ok: false, reason: "timeout" },
+      { ok: false, reason: "api_error" },
+      { ok: false, reason: "rate_limited" },
+    ]) {
+      const ask = vi.fn().mockResolvedValue(failure);
+      const decision = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+        studyId: LLM_STUDY,
+        supabase: client,
+        ask,
+      });
+      expect(decision).toEqual({ reply: DEFAULT_REPLY, nextStatus: "bot" });
+    }
+
+    // Belt and braces: the seam contract forbids throws, a bad one still
+    // cannot silence the bot.
+    const throwing = vi.fn().mockRejectedValue(new Error("model exploded"));
+    await expect(
+      resolveBotReply("bot", UNKNOWN_INTENT, null, {
+        studyId: LLM_STUDY,
+        supabase: client,
+        ask: throwing,
+      }),
+    ).resolves.toEqual({ reply: DEFAULT_REPLY, nextStatus: "bot" });
+  });
+
+  it("STOP, closed, disabled and greeting inputs never reach the model", async () => {
+    configuredEnv(); // the gate must be the RULE, not the config
+    const ask = vi.fn();
+    const base = { studyId: LLM_STUDY, supabase: contextClient(), ask };
+
+    // STOP closes silently (opt-out wins even with the LLM on).
+    await expect(resolveBotReply("bot", "STOP", null, base)).resolves.toEqual({
+      reply: null,
+      nextStatus: "cerrada",
+    });
+    // A closed conversation stays closed.
+    await expect(
+      resolveBotReply("cerrada", UNKNOWN_INTENT, null, base),
+    ).resolves.toEqual({ reply: null, nextStatus: "cerrada" });
+    // The admin toggle keeps the bot silent — no model call behind a pause.
+    await expect(
+      resolveBotReply("bot", UNKNOWN_INTENT, { enabled: false }, base),
+    ).resolves.toEqual({ reply: null, nextStatus: "bot" });
+    // The greeting rule answers with the configured copy, never the model.
+    const greeting = await resolveBotReply(
+      "bot",
+      "hola, buenos días",
+      { enabled: true, greeting: CUSTOM_GREETING },
+      base,
+    );
+    expect(greeting.reply).toBe(CUSTOM_GREETING);
+
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("caps a long inbound at LLM_USER_MAX_CHARS before sending it", async () => {
+    configuredEnv();
+    const ask = vi.fn().mockResolvedValue({ ok: true, text: "Respuesta" });
+    const longText = `¿Me pasan presupuesto? ${"x".repeat(5000)}`;
+
+    await resolveBotReply("bot", longText, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient(),
+      ask,
+    });
+
+    const input = ask.mock.calls[0][0] as { user: string };
+    expect(input.user).toHaveLength(LLM_USER_MAX_CHARS);
+    expect(LLM_USER_MAX_CHARS).toBe(1000);
+  });
+
+  it("still answers when the case-context fetch fails or explodes", async () => {
+    configuredEnv();
+    const ask = vi.fn().mockResolvedValue({ ok: true, text: "Te oriento." });
+
+    // Partial failure: the cases query errors — no carátulas in context.
+    const decision = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient({
+        studyName: "Estudio Rivera",
+        failTables: ["cases"],
+      }),
+      ask,
+    });
+    const input = ask.mock.calls[0][0] as { system: string };
+    expect(input.system).toContain("Estudio Rivera");
+    expect(input.system).not.toContain("Gómez");
+    expect(decision.reply).toBe(`Te oriento.\n\n${LLM_DISCLAIMER}`);
+
+    // Total failure: even building the client throws — the reply still goes
+    // out, without context and never as silence.
+    const decision2 = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient({ explode: true }),
+      ask,
+    });
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(decision2.reply).toBe(`Te oriento.\n\n${LLM_DISCLAIMER}`);
+  });
+
+  it("uses the real askLlm client when no seam is given (fetch stubbed)", async () => {
+    configuredEnv();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "Respuesta del modelo" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await resolveBotReply("bot", UNKNOWN_INTENT, null, {
+      studyId: LLM_STUDY,
+      supabase: contextClient({ studyName: "Estudio Rivera" }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/chat/completions");
+    expect(decision.reply).toBe(`Respuesta del modelo\n\n${LLM_DISCLAIMER}`);
   });
 });

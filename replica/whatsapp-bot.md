@@ -611,3 +611,93 @@ copy is ready:
   the recorded payload (the same builder produces the wire body) plus the
   absence of any attempt; the request shape itself is covered by the
   stubbed-`fetch` unit tests.
+
+---
+
+## 9. LLM fallback — WhatsApp Unit 3 (fase 2, env-gated)
+
+The rule engine still decides everything; the model only answers the ONE
+case no rule covers — the unknown intent — and only when it is switched on
+through the environment.
+
+### Gate — env-only, no migration, no admin screen
+
+- **`AI_API_KEY` present = enabled. The key IS the switch:** *toggle en
+  admin = futuro; hoy se enciende con `AI_API_KEY`.* No migration, no
+  `bot_settings` column, no change to `/configuracion/bot` (§7 untouched).
+- The key is **added by the user later, in `.env.local`** (git-ignored) —
+  no real value exists in any repo file; `.env.example` documents the four
+  names with no values (`AI_API_KEY`, `AI_MODEL` default `gpt-4o-mini`,
+  optional `AI_BASE_URL` default `https://api.openai.com/v1`, optional
+  `AI_MAX_TOKENS` default 400, clamped to 1..2048).
+- Without the key the webhook behaves byte-identically to Units 1-2: the
+  unknown intent gets `DEFAULT_REPLY` and no network call is made — that is
+  the state of the dev project today, and what `e2e/w06-llm-fallback.spec.ts`
+  proves end to end.
+
+### Client — `lib/ai/llm.ts` (new)
+
+- Provider-agnostic, OpenAI-compatible: `askLlm({ system, user, signal })`
+  POSTs `{base}/chat/completions` with a bearer key, the two messages, a
+  low temperature (0.2) and the capped `max_tokens`, ~10 s abort.
+- **NEVER throws** — the same contract as `wa-graph.ts`: every failure is
+  `{ ok: false, reason }` with a typed reason
+  (`not_configured | timeout | rate_limited | api_error | network_error |
+  bad_response`), and a missing key logs once per process before any I/O.
+- Server-only: reached from the webhook pipeline, no `NEXT_PUBLIC_` var,
+  no reference under `app/` or `components/` (grep-asserted in the unit
+  suite and in the build verification).
+
+### Wiring — `resolveBotReply(...)` (lib/data/bot-llm.ts)
+
+- **Rules FIRST, unchanged:** `decideBotReply` (STOP, closed, disabled,
+  greeting, configured copies) runs exactly as before and stays
+  synchronous. `resolveBotReply` is the async wrapper around it: it returns
+  the rule decision untouched for every explicit outcome, and only the
+  `DEFAULT_REPLY` sentinel — "no rule matched" — may reach the model.
+  STOP, a closed conversation, the admin toggle, the greeting rule and any
+  future handoff/off-hours rule therefore **never reach the LLM**.
+- **Call-shape change (reported):** the webhook's ONE call site
+  (`lib/supabase/meta-webhook.ts`) moved from `decideBotReply(...)` to
+  `await resolveBotReply(status, text, settings, { studyId, supabase })`.
+  `decideBotReply` itself kept its signature, so the fake driver
+  (`lib/data/whatsapp.ts`) and its tests are untouched — the demo layer
+  stays rules-only, like it stays send-less (§8 scope note).
+- **System prompt** (Spanish, rioplatense voseo): a legal-studio
+  assistant for the study, WA-020 quoted as mandatory closing, an explicit
+  ban on inventing case statuses/expediente/juzgado/dates, "a human will
+  follow up" when unsure or when asked for legal advice, and no invented
+  studio data. **Light context:** the study name + the case carátulas
+  (≤10 rows, `id`/`caratula`, scoped to the study through the webhook's own
+  service client); any failure of that read degrades to an answer WITHOUT
+  context — it never blocks or fails the reply.
+- **User message:** the inbound text, trimmed and capped at 1000 chars
+  (`LLM_USER_MAX_CHARS`).
+- **Disclaimer guarantee (WA-020):** appended *client-side, deterministically*
+  — `Esto es orientación general, no es asesoramiento legal. Para tu caso
+  concreto, consultá con una persona del estudio.` — included even when the
+  model omits it, never duplicated when it obeys the prompt.
+- **Any failure → today's default rule reply.** Timeout, rate limit, bad
+  payload, a throwing seam: the bot answers `DEFAULT_REPLY` and never goes
+  silent — the same philosophy as `not_configured` in Units 1-2.
+
+### Tests (all stubbed, zero live model calls)
+
+- `lib/ai/llm.test.ts` (12): config guard (`not_configured`, no network,
+  one log per process), request shape (URL/bearer/messages/temperature/
+  token default + clamp + overrides), typed failures (429, 5xx, malformed
+  payload, refused connection, 10 s abort, caller signal), and the
+  client-bundle grep (no `AI_API_KEY` under `app/` or `components/`).
+- `lib/data/bot-settings.test.ts` (+8, where the bot's tests live):
+  non-configured → default rule reply with no model call; configured → one
+  call carrying system + disclaimer + case context and a reply that always
+  ends in WA-020 (appended when the model omits it, not duplicated when it
+  includes it); timeout/`api_error`/throwing seam → rule fallback;
+  STOP/closed/disabled/greeting never call the model; >1000-char inbound
+  capped; failing context fetch still answers; the real `askLlm` path with
+  a stubbed `fetch`.
+- `e2e/w06-llm-fallback.spec.ts` (1): signed webhook with an unknown-intent
+  message on the un-configured dev project → the stored row AND the inbox
+  thread show the rule fallback (and no WA-020 line, proving the model
+  never ran); skips itself with a printed reason once the user adds
+  `AI_API_KEY` to `.env.local`.

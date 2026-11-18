@@ -13,6 +13,11 @@
  * screen /configuracion/bot) and reach this function through `settings`.
  * Callers that have not loaded settings (or that failed to) pass nothing and
  * get exactly the behaviour they had before the settings existed.
+ *
+ * Unit 3: `resolveBotReply` (lib/data/bot-llm.ts) wraps this function and
+ * adds the env-gated LLM fallback for the ONE case this engine does not
+ * decide with a rule — the unknown intent (DEFAULT_REPLY). This module stays
+ * synchronous and pure: every rule still lives here.
  */
 
 import type { WaConversationStatus } from "@/lib/types";
@@ -35,8 +40,11 @@ export const GREETING_REPLY =
   "¡Hola! Soy el asistente del estudio. ¿En qué te puedo ayudar?";
 
 /** Acknowledgement for anything that is not a greeting (no settings home:
- *  bot_settings holds the three editable strings, this one stays fixed). */
-const DEFAULT_REPLY =
+ *  bot_settings holds the three editable strings, this one stays fixed).
+ *  Exported because it is the SENTINEL for "no rule matched": the LLM
+ *  fallback (lib/data/bot-llm.ts) only ever considers a reply equal to this
+ *  constant — every other outcome is an explicit rule and bypasses the model. */
+export const DEFAULT_REPLY =
   "Recibí tu mensaje. Alguien del estudio se va a comunicar con vos a la brevedad.";
 
 /** One study's editable bot configuration (the bot_settings row). */
@@ -71,6 +79,16 @@ export const DEFAULT_BOT_SETTINGS: Omit<BotSettings, "studyId"> = {
 };
 
 /**
+ * True when the text fires the greeting rule — the ONE pattern
+ * `decideBotReply` branches on for a reply. Exported so the LLM fallback
+ * can tell "a rule matched" from "no rule matched" without ever
+ * re-implementing the pattern.
+ */
+export function matchesGreetingRule(text: string): boolean {
+  return GREETING_PATTERN.test(text);
+}
+
+/**
  * Rules (M1):
  *  - a conversation already stopped by STOP never replies again;
  *  - `STOP` / `baja` / `cancelar` closes the conversation silently — the
@@ -95,7 +113,7 @@ export function decideBotReply(
     return { reply: null, nextStatus: currentStatus };
   }
   const greeting = settings?.greeting?.trim() || GREETING_REPLY;
-  const reply = GREETING_PATTERN.test(text) ? greeting : DEFAULT_REPLY;
+  const reply = matchesGreetingRule(text) ? greeting : DEFAULT_REPLY;
   return { reply, nextStatus: currentStatus };
 }
 

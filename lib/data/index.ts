@@ -72,6 +72,15 @@ export {
   type UpdateBotSettingsInput,
 } from "./bot-settings";
 
+// WhatsApp bot LLM fallback (Unit 3) — env-gated on AI_API_KEY, rules first
+export {
+  LLM_DISCLAIMER,
+  LLM_USER_MAX_CHARS,
+  resolveBotReply,
+  type LlmAsk,
+  type ResolveBotReplyOptions,
+} from "./bot-llm";
+
 // Errors: typed codes + the Spanish copy the UI shows.
 export { DataLayerError, ERROR_COPY, errorCopy, type DataErrorCode } from "./errors";
 

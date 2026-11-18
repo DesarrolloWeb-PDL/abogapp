@@ -144,8 +144,13 @@ none in any built client chunk (`.next/static`).
    reprocesses — same semantics as the fake `markEventProcessed`/
    `releaseEventKey`), then upserts contact/conversation, stores both
    messages and answers with the shared bot rules (`lib/data/bot.ts` — one
-   implementation for both drivers). The `wa_webhook_events` table (RLS on,
-   no policies → service role only) is in the migration.
+   implementation for both drivers). The reply is not local anymore: it is
+   delivered through the Graph API when `WHATSAPP_ACCESS_TOKEN` exists
+   (recorded `not_configured` otherwise, WhatsApp Unit 2) and, only when no
+   rule matches, `resolveBotReply` may answer through an env-gated LLM
+   (`AI_API_KEY`, WhatsApp Unit 3) — rules always run first, and any model
+   failure falls back to the default rule reply. The `wa_webhook_events`
+   table (RLS on, no policies → service role only) is in the migration.
    The in-memory-store multi-instance gap (open item 3) is closed for the
    supabase driver: persistence now lives in Postgres.
 

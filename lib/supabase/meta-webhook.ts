@@ -10,7 +10,9 @@
  *  2. contact + conversation upsert, inbound message stored;
  *  3. the shared bot rules (lib/data/bot.ts), fed by the study's
  *     bot_settings row (Unit 1: configurable greeting/toggle), decide the
- *     reply;
+ *     reply via resolveBotReply (lib/data/bot-llm.ts, Unit 3: an
+ *     env-gated LLM fallback answers ONLY the unknown-intent case when
+ *     AI_API_KEY is set — rules always run first);
  *  4. reply stored as an outbound message, then delivered through the Graph
  *     API when credentials exist and the 24 h window is open (Unit 2 — the
  *     outcome is written back as `wa_messages.status` / `.error`, and a
@@ -22,7 +24,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { decideBotReply, type BotSettings } from "@/lib/data/bot";
+import type { BotSettings } from "@/lib/data/bot";
+import { resolveBotReply } from "@/lib/data/bot-llm";
 import {
   parseInboundMessages,
   parseStatusUpdates,
@@ -160,8 +163,8 @@ async function storeInboundAndReply(
 
   // Unit 1: the study's bot_settings row drives the reply copy — ONE read
   // per inbound message (never per field: no N+1). A failed read must never
-  // stop the bot answering, so it falls back to null and decideBotReply
-  // uses the built-in defaults (identical to the pre-settings behaviour).
+  // stop the bot answering, so it falls back to null and the rules use the
+  // built-in defaults (identical to the pre-settings behaviour).
   let settings: BotSettings | null = null;
   try {
     settings = await getBotSettingsSupabase(study.id, supabase);
@@ -169,7 +172,16 @@ async function storeInboundAndReply(
     settings = null;
   }
 
-  const decision = decideBotReply(conversation.status, message.text, settings);
+  // Units 1+3: rules decide first (STOP / greeting / configured copies);
+  // ONLY the unknown-intent case may reach the LLM fallback, and only when
+  // AI_API_KEY is set (env-gated). The context read for the model rides on
+  // THIS service client and a failure there never stops the reply.
+  const decision = await resolveBotReply(
+    conversation.status,
+    message.text,
+    settings,
+    { studyId: study.id, supabase },
+  );
   const now = new Date().toISOString();
   const windowExpires = new Date(Date.now() + WINDOW_MS).toISOString();
 
