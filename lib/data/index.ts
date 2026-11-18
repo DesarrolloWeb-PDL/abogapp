@@ -43,6 +43,26 @@ export { listStages, type CaseStage } from "./stages";
 // Pruebas + plazos (S12) — fecha límite always computed by lib/plazos.
 export { createPrueba, listPruebas, type CreatePruebaInput } from "./pruebas";
 
+// Tasks (S16 / F04) — M2 list slice: create, estado transitions, filters.
+// The kanban board (drag-drop, grouping, bulk bar) is deferred past this slice.
+export {
+  compareTasksByDue,
+  createTask,
+  isTaskOverdue,
+  listTaskStatuses,
+  listTasks,
+  updateTask,
+  TASK_PRIORIDADES,
+  TASK_TITULO_MAX,
+  TERMINAL_STATUS_KEYS,
+  type CreateTaskInput,
+  type Task,
+  type TaskFilter,
+  type TaskPrioridad,
+  type TaskStatus,
+  type UpdateTaskPatch,
+} from "./tasks";
+
 // Notifications (S21)
 export {
   listNotifications,

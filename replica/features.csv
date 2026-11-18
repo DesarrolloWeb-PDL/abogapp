@@ -26,9 +26,9 @@ Dias inhabiles settings (system + studio),plazos,must,yes,no,S30 dias-inhabiles;
 Deadline countdown color states,plazos,should,yes,no,S12; green / amber <=48h / red vencido | clone badge is plain text today (case-detail-view); no colour states
 Standalone deadline calculator tool,plazos,should,yes,no,S34 /tool/deadline-calculator; free on every plan
 Plazo reminder notifications (day-before / day-of),plazos,must,yes,no,F03 and F06; 07:00 to all members | M2 (Inngest jobs); clone only writes a creation-time in-app notification (F03-H1)
-Task creation and assignment,tareas,must,yes,no,F04; three clicks on the happy path | M2
-Task states (five defaults + custom),tareas,must,yes,no,S16; Pendiente / En curso / Para revisar / Completada / Cancelada | M2
-Kanban board and list views,tareas,should,yes,no,S16; group by estado / responsable / prioridad / expediente
+Task creation and assignment,tareas,must,yes,partial,F04; three clicks on the happy path | M2: create + self-assignment + assignment alert ship (e2e F04); cross-member assignment deferred until a members directory exists (profiles RLS is own-row-only)
+Task states (five defaults + custom),tareas,must,yes,partial,S16; Pendiente / En curso / Para revisar / Completada / Cancelada | M2: five defaults read from task_statuses + row transitions ship; custom-state management (settings screen) pending
+Kanban board and list views,tareas,should,yes,partial,S16; group by estado / responsable / prioridad / expediente | M2: list view with estado filter + search ships; board / grouping / drag pending
 AI-created tasks (Procurador IA),tareas,could,yes,no,S16 filter Creada por; source actuacion + plazo
 Shared studio calendar (five views),agenda,should,yes,no,S17; Dia / Semana / Mes / Año / Lista
 Categories and audiencias / vencimientos overlays,agenda,should,yes,no,S17; six default categories with 11 colors
