@@ -109,13 +109,24 @@ export {
   type UpdateMovementPatch,
 } from "./movements";
 
-// Notifications (S21)
+// Notifications (S21) — list + mark-read, M2 filtered pagination and the
+// per-category preferences behind the emission gate.
 export {
+  clearNotificationPreferenceCache,
+  listNotificationPreferences,
   listNotifications,
+  listNotificationsPage,
   markNotificationRead,
+  NOTIFICATION_CATEGORIES,
   onNotification,
   onNotificationsChanged,
   unreadCount,
+  updateNotificationPreference,
+  type NotificationChannel,
+  type NotificationEstado,
+  type NotificationListOptions,
+  type NotificationPage,
+  type NotificationPreference,
 } from "./notifications";
 
 // WhatsApp intake (Module A)

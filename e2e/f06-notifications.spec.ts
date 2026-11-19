@@ -34,6 +34,9 @@ test.describe("F06 notifications page", () => {
     await expect(
       page.getByRole("heading", { name: "Notificaciones" }),
     ).toBeVisible();
+    // M2 pagination: 50+ rows now live behind "Cargar más", and the seed row
+    // is the oldest of them — the S21 search narrows the list to it.
+    await page.getByLabel("Buscar notificaciones").fill("informe pericial");
     // Seeded row with its accents intact (F06-E3).
     await expect(page.getByText(SEED.notificationTitle)).toBeVisible();
     // Timestamps render as dd/mm/yyyy … (F06-E12, ART zone).
@@ -129,6 +132,8 @@ test.describe("F06 notifications page", () => {
     });
     await page.goto("/notificaciones");
     await expect(page.getByText("Cargando tus notificaciones…")).toBeVisible();
+    // The seed row is page 3 of the paginated list: search narrows to it.
+    await page.getByLabel("Buscar notificaciones").fill("informe pericial");
     await expect(page.getByText(SEED.notificationTitle)).toBeVisible({
       timeout: 15_000,
     });
@@ -154,6 +159,8 @@ test.describe("F06 notifications page", () => {
     await page.unroute(NOTIF_REST, serverErrorHandler);
 
     await page.getByRole("button", { name: "Reintentar" }).click();
+    // Page 3 of the paginated list: narrow to the seed row with the search.
+    await page.getByLabel("Buscar notificaciones").fill("informe pericial");
     await expect(page.getByText(SEED.notificationTitle)).toBeVisible();
     await guard.assertClean();
   });
@@ -202,6 +209,8 @@ test.describe("F06 notifications page", () => {
     await expect(
       page.getByRole("heading", { name: "Notificaciones" }),
     ).toBeVisible();
+    // The seed row sits behind pagination: search first, then tab to it.
+    await page.getByLabel("Buscar notificaciones").fill("informe pericial");
     await expect(seededRow).toBeVisible();
 
     const reachedRow = await tabUntil(

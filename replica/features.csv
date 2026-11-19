@@ -37,9 +37,9 @@ Google Calendar sync,agenda,could,yes,no,S12 and S17; Google Calendar status row
 File upload with per-case folders,documentos,should,yes,no,S18; breadcrumb + storage meter + upload panel
 File preview and version list,documentos,should,yes,no,S19; thin evidence
 Protected folders and permission padlock,documentos,should,yes,no,S18; system documents / pruebas / assistant attachments
-In-app notification panel and page,notificaciones,must,yes,partial,S21 | page + header bell (link; badge 0-9/9+) read the DB; read-on-click deep links; mark-all; 4 category badges green (F06-H1); bell dropdown panel; category filter; pagination; 6 categories = M2
+In-app notification panel and page,notificaciones,must,yes,partial,S21 | page + header bell + read-on-click deep links + mark-all + search + estado/categoria filters + Cargar mas (20/page) + Preferencias modal shipped (e2e m2-notificaciones); pending: bell dropdown panel with Todas/No leidas tabs
 Daily email digest Mon-Fri 08:00,notificaciones,must,yes,no,F06 Resumen diario | M2 (Resend + jobs not in M1)
-Notification preferences per category,notificaciones,should,yes,no,S21 Preferencias; thin evidence
+Notification preferences per category,notificaciones,should,yes,partial,S21 Preferencias modal + store + emission gate shipped (fails open on read errors); task-alert insert bypasses the gate - fix in flight
 Web push (desktop + Android),notificaciones,could,yes,no,F06; no iOS push so email digest only
 AI assistant chat with page-level citations,asistente-ia,could,yes,no,S22; effort selector + skills via / + step log
 AI drafting split view (Redactar escritos),asistente-ia,could,yes,no,F05; draft versions + Guardar en Documentos
