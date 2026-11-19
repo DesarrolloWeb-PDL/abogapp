@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import {
   Bell,
+  CalendarDays,
   FolderOpen,
   ListTodo,
   MessageSquare,
@@ -14,10 +15,11 @@ import {
 import { useUnreadCount } from "@/components/shell/use-unread-count";
 
 /**
- * M1 navigation subset + the M2 Tareas entry: Expedientes, Tareas (S16, the
- * original's slot between Expedientes and Agenda), Bandeja WhatsApp,
- * Notificaciones and the bot Configuración screen (WhatsApp Unit 1). The
- * rest of the sidebar (Inicio, Agenda…) arrives with later milestones.
+ * M1 navigation subset + the M2 Tareas entry and the Agenda (S17) entry:
+ * Expedientes, Tareas (S16, the original's slot between Expedientes and
+ * Agenda), Bandeja WhatsApp, Agenda, Notificaciones and the bot
+ * Configuración screen (WhatsApp Unit 1). The rest of the sidebar (Inicio…)
+ * arrives with later milestones.
  *
  * `usePathname` lives in a child component behind <Suspense> because this nav
  * renders from a shared layout above dynamic routes (/expedientes/[id]): with
@@ -37,6 +39,7 @@ export const mainNavItems: NavItem[] = [
   { href: "/expedientes", label: "Expedientes", icon: FolderOpen },
   { href: "/tareas", label: "Tareas", icon: ListTodo },
   { href: "/bandeja", label: "Bandeja WhatsApp", icon: MessageSquare },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays },
   {
     href: "/notificaciones",
     label: "Notificaciones",
