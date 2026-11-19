@@ -19,6 +19,7 @@ export const CASE_DETAIL_TABS = [
   { value: "movimientos", label: "Movimientos" },
   { value: "tareas", label: "Tareas" },
   { value: "pruebas", label: "Pruebas" },
+  { value: "agenda", label: "Agenda" },
 ] as const;
 
 export type CaseDetailTab = (typeof CASE_DETAIL_TABS)[number]["value"];

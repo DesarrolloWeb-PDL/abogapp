@@ -9,8 +9,9 @@ import {
 
 /**
  * S08 case detail hub — the tab strip beyond Resumen/Movimientos/Pruebas:
- * the Tareas tab (S16 scoped to the expediente) reachable through the same
- * `?tab=` deep link, plus the F02-E7 regression guard proving the existing
+ * the Tareas tab (S16 scoped to the expediente) and the Agenda tab (S17
+ * scoped version opening in Lista) reachable through the same `?tab=`
+ * deep link, plus the F02-E7 regression guard proving the existing
  * deep-link behaviour (query survives a refresh, Resumen drops it) still
  * holds with the wider strip.
  *
@@ -38,6 +39,39 @@ async function seedTaskOnGomez(titulo: string): Promise<string> {
     prioridad: "normal",
   });
   if (!seeded?.id) throw new Error("REST returned no task row");
+  return seeded.id;
+}
+
+/** Unique prefix so a crashed run can pre-clean, cleanup can target. */
+const EVENT_PREFIX = "S08 agenda ";
+
+async function cleanSeededEvents(): Promise<void> {
+  await restSend(
+    "DELETE",
+    `events?title=like.${encodeURIComponent(`${EVENT_PREFIX}%`)}`,
+  );
+}
+
+/** One manual event, optionally pinned to a case (events.case_id). */
+async function seedAgendaEvent(options: {
+  title: string;
+  startAt: string;
+  caseId?: string;
+}): Promise<string> {
+  const [membership] = await restGet<{ study_id: string }[]>(
+    "memberships?status=eq.active&select=study_id&limit=1",
+  );
+  const [seeded] = await restSend<{ id: string }[]>("POST", "events", {
+    study_id: membership.study_id,
+    title: options.title,
+    start_at: options.startAt,
+    end_at: new Date(
+      Date.parse(options.startAt) + 60 * 60 * 1000,
+    ).toISOString(),
+    source: "manual",
+    ...(options.caseId ? { case_id: options.caseId } : {}),
+  });
+  if (!seeded?.id) throw new Error("REST returned no event row");
   return seeded.id;
 }
 
@@ -71,7 +105,7 @@ test.describe("S08 case detail tabs", () => {
       await expect(page).toHaveURL(/tab=tareas/);
       await expect(row).toBeVisible();
 
-      // Four tabs at 390 px: the strip scrolls, the page must not.
+      // Five tabs at 390 px: the strip scrolls, the page must not.
       await page.setViewportSize({ width: 390, height: 844 });
       const fits = await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth + 1,
@@ -87,6 +121,77 @@ test.describe("S08 case detail tabs", () => {
     }
   });
 
+  test("S08-T2 Agenda tab: opens in Lista scoped to the case, survives a refresh", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const scopedTitle = `${EVENT_PREFIX}${stamp} gomez`;
+    const studyTitle = `${EVENT_PREFIX}${stamp} estudio`;
+    const scopedStart = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const studyStart = new Date(
+      Date.now() + 2 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    try {
+      await cleanSeededEvents();
+      await seedAgendaEvent({
+        title: scopedTitle,
+        startAt: scopedStart,
+        caseId: SEED.gomezId,
+      });
+      // Same study, no case: visible in the studio /agenda, never here.
+      await seedAgendaEvent({ title: studyTitle, startAt: studyStart });
+
+      await page.goto(`/expedientes/${SEED.gomezId}`);
+      await tabStrip(page)
+        .getByRole("link", { name: "Agenda", exact: true })
+        .click();
+      await expect(page).toHaveURL(/tab=agenda/);
+
+      // Opens in Lista (recon S17): the shared panel's list-level search
+      // is the view's signature, and Resumen's cards are gone.
+      await expect(page.getByLabel("Buscar eventos")).toBeVisible();
+      await expect(
+        page.getByRole("listitem").filter({ hasText: scopedTitle }),
+      ).toHaveCount(1);
+      await expect(
+        page.getByRole("listitem").filter({ hasText: studyTitle }),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("heading", { name: "Próximos plazos" }),
+      ).toHaveCount(0);
+      await expect(
+        tabStrip(page).getByRole("link", { name: "Agenda", exact: true }),
+      ).toHaveAttribute("aria-current", "page");
+      await expectNoAxeViolations(page, "/expedientes/[id] ?tab=agenda (S08)");
+
+      // F02-E7 contract applied to the new tab: the query survives a reload
+      // and the scope still holds.
+      await page.reload();
+      await expect(page).toHaveURL(/tab=agenda/);
+      await expect(
+        page.getByRole("listitem").filter({ hasText: scopedTitle }),
+      ).toHaveCount(1);
+      await expect(
+        page.getByRole("listitem").filter({ hasText: studyTitle }),
+      ).toHaveCount(0);
+
+      // Scoping proof: the very same study row IS listed in /agenda, so
+      // its absence above is listEventsByCase working, not a dead seed.
+      await page.goto("/agenda");
+      await expect(
+        page.getByRole("listitem").filter({ hasText: studyTitle }),
+      ).toHaveCount(1);
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
   test("S08-E7 regression: the existing ?tab= deep link still holds with the wider strip", async ({
     page,
   }) => {
@@ -97,10 +202,17 @@ test.describe("S08 case detail tabs", () => {
     ).toBeVisible();
 
     // The strip keeps the recon order (Resumen → Movimientos → Tareas →
-    // Pruebas); a reorder or a dropped tab fails here before F02-E7 does.
+    // Pruebas → Agenda); a reorder or a dropped tab fails here before
+    // F02-E7 does.
     await expect(
       tabStrip(page).getByRole("link").allInnerTexts(),
-    ).resolves.toEqual(["Resumen", "Movimientos", "Tareas", "Pruebas"]);
+    ).resolves.toEqual([
+      "Resumen",
+      "Movimientos",
+      "Tareas",
+      "Pruebas",
+      "Agenda",
+    ]);
 
     await tabStrip(page).getByRole("link", { name: "Pruebas" }).click();
     await expect(page).toHaveURL(/tab=pruebas/);

@@ -11,6 +11,7 @@ import { getCase, listPruebas } from "@/lib/data";
 import { formatDate } from "@/lib/format";
 import type { Prueba, StudyCase } from "@/lib/types";
 import { CASE_DETAIL_TABS, caseDetailTabHref, type CaseDetailTab } from "./case-tabs";
+import { AgendaTab } from "./agenda-tab";
 import { MovimientosTab } from "./movimientos-tab";
 import { TareasTab } from "./tareas-tab";
 
@@ -21,7 +22,7 @@ import { TareasTab } from "./tareas-tab";
  * and the deep link can never disagree. Data loads through the data layer
  * in the browser (the fake store lives client-side), with skeleton /
  * missing / error states. The remaining tabs (Actuaciones, Audiencias,
- * Agenda, Partes, Documentos, Finanzas) arrive when their data layer does.
+ * Partes, Documentos, Finanzas) arrive when their data layer does.
  */
 
 type LoadState =
@@ -137,7 +138,7 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
       </header>
 
       <nav aria-label="Secciones del expediente">
-        {/* Four tabs overflow 390 px; the strip scrolls instead of the page. */}
+        {/* Five tabs overflow 390 px; the strip scrolls instead of the page. */}
         <ul className="flex gap-1 overflow-x-auto border-b border-border">
           {CASE_DETAIL_TABS.map((entry) => {
             const active = entry.value === tab;
@@ -243,7 +244,11 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
         <MovimientosTab caseId={record.id} />
       ) : tab === "tareas" ? (
         <TareasTab caseId={record.id} />
+      ) : tab === "agenda" ? (
+        <AgendaTab caseId={record.id} />
       ) : (
+        // The fallback is Pruebas: resolveCaseDetailTab only ever answers
+        // with a registered value, and Pruebas is the one left here.
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-text">

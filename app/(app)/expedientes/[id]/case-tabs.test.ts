@@ -20,12 +20,14 @@ describe("case detail tab vocabulary (S08)", () => {
       "movimientos",
       "tareas",
       "pruebas",
+      "agenda",
     ]);
     expect(CASE_DETAIL_TABS.map((entry) => entry.label)).toEqual([
       "Resumen",
       "Movimientos",
       "Tareas",
       "Pruebas",
+      "Agenda",
     ]);
   });
 
@@ -52,6 +54,9 @@ describe("case detail tab vocabulary (S08)", () => {
     );
     expect(caseDetailTabHref("case-1", "pruebas")).toBe(
       "/expedientes/case-1?tab=pruebas",
+    );
+    expect(caseDetailTabHref("case-1", "agenda")).toBe(
+      "/expedientes/case-1?tab=agenda",
     );
   });
 });
