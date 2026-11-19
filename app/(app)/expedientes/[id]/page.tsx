@@ -1,18 +1,15 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import {
-  CaseDetailSkeleton,
-  CaseDetailView,
-  type CaseDetailTab,
-} from "./case-detail-view";
+import { CaseDetailSkeleton, CaseDetailView } from "./case-detail-view";
+import { resolveCaseDetailTab } from "./case-tabs";
 
 export const metadata: Metadata = { title: "Expediente" };
 
 /**
- * Case detail hub (S08) — M2 slice with the Resumen + Movimientos +
- * Pruebas tabs and the `?tab=` deep link (values are documented as unknown
- * in the recon, so the clone owns its own values: `resumen` |
- * `movimientos` | `pruebas`).
+ * Case detail hub (S08) — the `?tab=` deep link: the raw query value is
+ * validated against the tab vocabulary in `case-tabs.ts` (values are
+ * documented as unknown in the recon, so the clone owns them), and an
+ * unknown value falls back to Resumen instead of erroring.
  *
  * `params` and `searchParams` are Promises in Next.js 16 and, with
  * cacheComponents enabled, must be awaited inside a Suspense boundary —
@@ -22,8 +19,6 @@ export const metadata: Metadata = { title: "Expediente" };
  * lives in the browser, so a server render could not see cases created
  * during this session.
  */
-
-const TAB_VALUES = ["resumen", "movimientos", "pruebas"] as const;
 
 export default function CaseDetailPage({
   params,
@@ -46,10 +41,9 @@ async function CaseDetail({
   const { id } = await params;
   const query = await searchParams;
 
-  const rawTab = typeof query.tab === "string" ? query.tab : "resumen";
-  const tab: CaseDetailTab = TAB_VALUES.some((value) => value === rawTab)
-    ? (rawTab as CaseDetailTab)
-    : "resumen";
+  const tab = resolveCaseDetailTab(
+    typeof query.tab === "string" ? query.tab : undefined,
+  );
 
   return <CaseDetailView id={id} tab={tab} />;
 }

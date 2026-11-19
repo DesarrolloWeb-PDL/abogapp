@@ -10,23 +10,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getCase, listPruebas } from "@/lib/data";
 import { formatDate } from "@/lib/format";
 import type { Prueba, StudyCase } from "@/lib/types";
+import { CASE_DETAIL_TABS, caseDetailTabHref, type CaseDetailTab } from "./case-tabs";
 import { MovimientosTab } from "./movimientos-tab";
+import { TareasTab } from "./tareas-tab";
 
 /**
- * Case detail hub (S08) — M1/M2 slice: Resumen + Movimientos + Pruebas
- * tabs with the `?tab=` deep link. Data loads through the data layer in
- * the browser (the fake store lives client-side), with skeleton /
- * missing / error states. The remaining tabs (Actuaciones, Tareas,
- * Audiencias, Agenda, Partes, Documentos, Finanzas) arrive later.
+ * Case detail hub (S08) — the tab strip and the tab bodies. The tab
+ * vocabulary (values, labels, order, `?tab=` hrefs) lives in
+ * `case-tabs.ts`, shared with the server page's query parsing, so the nav
+ * and the deep link can never disagree. Data loads through the data layer
+ * in the browser (the fake store lives client-side), with skeleton /
+ * missing / error states. The remaining tabs (Actuaciones, Audiencias,
+ * Agenda, Partes, Documentos, Finanzas) arrive when their data layer does.
  */
-
-export type CaseDetailTab = "resumen" | "movimientos" | "pruebas";
-
-const TABS: ReadonlyArray<{ value: CaseDetailTab; label: string }> = [
-  { value: "resumen", label: "Resumen" },
-  { value: "movimientos", label: "Movimientos" },
-  { value: "pruebas", label: "Pruebas" },
-];
 
 type LoadState =
   | { status: "loading" }
@@ -141,13 +137,11 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
       </header>
 
       <nav aria-label="Secciones del expediente">
-        <ul className="flex gap-1 border-b border-border">
-          {TABS.map((entry) => {
+        {/* Four tabs overflow 390 px; the strip scrolls instead of the page. */}
+        <ul className="flex gap-1 overflow-x-auto border-b border-border">
+          {CASE_DETAIL_TABS.map((entry) => {
             const active = entry.value === tab;
-            const href =
-              entry.value === "resumen"
-                ? `/expedientes/${record.id}`
-                : `/expedientes/${record.id}?tab=${entry.value}`;
+            const href = caseDetailTabHref(record.id, entry.value);
 
             return (
               <li key={entry.value}>
@@ -247,6 +241,8 @@ export function CaseDetailView({ id, tab }: { id: string; tab: CaseDetailTab }) 
         </div>
       ) : tab === "movimientos" ? (
         <MovimientosTab caseId={record.id} />
+      ) : tab === "tareas" ? (
+        <TareasTab caseId={record.id} />
       ) : (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
