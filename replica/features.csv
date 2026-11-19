@@ -2,7 +2,7 @@ feature,area,priority,original,clone,notes
 Email and password sign-up and login,auth,must,yes,yes,S01 and S02; no credit card required at sign-up | Supabase Auth driver (DATA_DRIVER) + email verification; proxy.ts refreshes the session (Next 16 middleware rename); AU01/AU02 e2e green (wrong password; empty fields; logout)
 Google sign-in and passkey login,auth,should,yes,no,S01 and S26; passkey flow evidenced in security docs
 Two-factor auth and backup codes,auth,should,yes,no,S26 Seguridad page; thin evidence (index lines only)
-Five-step onboarding wizard (jurisdictions / profile / studio),auth,must,yes,partial,S03; creates the studio right after sign-up | M1: steps 1-3 of 5 (jurisdicciones / perfil / estudio); steps 4-5 arrive in M2
+Five-step onboarding wizard (jurisdictions / profile / studio),auth,must,yes,partial,S03; creates the studio right after sign-up | M2: all 5 steps shipped in recon order (jurisdicciones / pitch / perfil / seguridad / estudio, e2e onboarding.spec.ts); pending: jurisdiction search, logo/photo upload, resume-where-you-left-off, skip-last-step auto-name, invitee path
 Email invitations for teammates,auth,should,yes,no,S28; invitee landing screen evidenced in configurar-tu-estudio
 PJN connector (CUIT/CUIL credential verify),judicial-sync,should,yes,no,S25; terms forbid scraping so build our own connector
 MEV sync via email forwarding,judicial-sync,should,yes,no,S25; six-step forwarding setup without credentials
@@ -11,7 +11,7 @@ Background sync scheduler with status chips,judicial-sync,should,yes,no,S25; Con
 Sync error handling and rate-limit retry,judicial-sync,should,yes,no,F01 edges; five attempts then stop then auto-retry 2 min to 6 h
 Manual case creation,expedientes,must,yes,yes,Module B MVP entry point; S07 Nuevo expediente | implemented through the data layer; F03-H1 green (form -> DB row)
 Expedientes list with search and filters,expedientes,must,yes,partial,S07 | search + Filtros panel with active-count badge + favorites + archive shipped (e2e m2-expedientes); pending: sync filter + column resize/reorder + 50-per-page loading
-Case detail hub with tabs,expedientes,must,yes,partial,S08 | Resumen + Pruebas tabs with ?tab= deep link (F02-E7 refresh keeps it); remaining 8 tabs = M2
+Case detail hub with tabs,expedientes,must,yes,partial,S08 | tabs Resumen/Movimientos/Tareas/Pruebas with ?tab= deep link (F02-E7 + e2e s08-tabs); pending: Actuaciones, Audiencias, Agenda, Partes, Documentos, Finanzas (all blocked on missing lib/data drivers)
 Favorites / archive / soft-delete cases,expedientes,must,yes,yes,S07 row menu and bulk bar; favorites are studio-wide | M2 shipped: star + archivar/desarchivar + soft-delete tras confirm + barra bulk (e2e m2-expedientes)
 Vista general cross-case matrix,expedientes,could,yes,no,S15; read-only by design; thin evidence
 Case stages (etapas) settings,expedientes,should,yes,yes,S30 settings page | M2 shipped: CRUD + orden + counts_as_active + last-stage guard en /configuracion/etapas (e2e s30 H1)
@@ -37,7 +37,7 @@ Google Calendar sync,agenda,could,yes,no,S12 and S17; Google Calendar status row
 File upload with per-case folders,documentos,should,yes,no,S18; breadcrumb + storage meter + upload panel
 File preview and version list,documentos,should,yes,no,S19; thin evidence
 Protected folders and permission padlock,documentos,should,yes,no,S18; system documents / pruebas / assistant attachments
-In-app notification panel and page,notificaciones,must,yes,partial,S21 | page + header bell + read-on-click deep links + mark-all + search + estado/categoria filters + Cargar mas (20/page) + Preferencias modal shipped (e2e m2-notificaciones); pending: bell dropdown panel with Todas/No leidas tabs
+In-app notification panel and page,notificaciones,must,yes,yes,S21 | page + header bell dropdown (Todas/No leidas tabs, e2e bell.spec.ts) + read-on-click deep links + mark-all + search + estado/categoria filters + Cargar mas (20/page) + Preferencias modal shipped (e2e m2-notificaciones)
 Daily email digest Mon-Fri 08:00,notificaciones,must,yes,no,F06 Resumen diario | M2 (Resend + jobs not in M1)
 Notification preferences per category,notificaciones,should,yes,yes,S21 Preferencias modal + store + gate en ambas costuras (incluye task alerts tras el fix) + fail-open (e2e M2-S21 + unit)
 Web push (desktop + Android),notificaciones,could,yes,no,F06; no iOS push so email digest only

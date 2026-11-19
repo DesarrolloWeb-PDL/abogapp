@@ -55,10 +55,10 @@ of `features.csv` had been stale since M1 T9; every one of the 70 rows was re-wa
 | # | Must-have | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | Email + password sign-up and login | **yes** | AU01/AU02 green (wrong password, empty fields, logout) |
-| 2 | Five-step onboarding wizard | **partial** | `onboarding-wizard.tsx`: "Paso {n} de 3" — steps 4–5 = M2 |
+| 2 | Five-step onboarding wizard | **partial** | `onboarding-wizard.tsx`: "Paso {n} de 5" — 5 steps shipped (M2); pending: jurisdiction search, logo/photo upload, resume, skip-last, invitee path |
 | 3 | Manual case creation | **yes** | F03-H1 green: form → DB row |
 | 4 | Expedientes list with search + filters | **partial** | search accent/typo-tolerant (BUG-003 fix, F02-E3); Filtros panel/favorites/archive = M2 |
-| 5 | Case detail hub with tabs | **partial** | 2 of 10 tabs (`resumen`, `pruebas`) + `?tab=` (F02-E7) |
+| 5 | Case detail hub with tabs | **partial** | 4 of 10 tabs (`resumen`, `movimientos`, `tareas`, `pruebas`) + `?tab=` (F02-E7, s08-tabs) |
 | 6 | Favorites / archive / soft-delete | **no** | no row menu or bulk bar in `expedientes-view.tsx` |
 | 7 | Manual movement log (S09) | **no** | no route, no model usage |
 | 8 | Pruebas tracking (six evidence types) | **partial** | create + plazo green (F03-H1); per-type estados/person picker/historial = M2 |
@@ -68,7 +68,7 @@ of `features.csv` had been stale since M1 T9; every one of the 70 rows was re-wa
 | 12 | Plazo reminder notifications (day-before/day-of) | **no** | no jobs; only the creation-time in-app notification (F03-H1) |
 | 13 | Task creation and assignment | **no** | no `/tareas` route |
 | 14 | Task states (five defaults) | **no** | — |
-| 15 | In-app notification panel and page | **partial** | page + bell + read-on-click deep links + mark-all green (F06-H1); bell dropdown, category filter, pagination = M2 |
+| 15 | In-app notification panel and page | **yes** | page + bell dropdown (Todas/No leidas, bell.spec.ts) + read-on-click deep links + mark-all green (F06-H1); category filter, search, pagination shipped (m2-notificaciones) |
 | 16 | Daily email digest Mon–Fri 08:00 | **no** | no Resend/jobs yet |
 
 Rows where `original = no` (WhatsApp module — our own scope) are excluded from the score:
@@ -140,7 +140,7 @@ count), so 26.5 reflects genuine structural divergence, not styling.
 | **F03** set a procedural deadline | ~6 clicks (list → row → Pruebas → Agregar Prueba → tipo + Continuar → Crear) | **4 clicks** from the list row: row → Pruebas → Agregar prueba → Guardar (F03-H1); the type picker is a field inside the single form, no Continuar step | **keep** — one step fewer than the original, same engine guarantees (DB trigger + feriados/feria) |
 | **F04** assign a task | ~3 clicks (Tareas → Nueva tarea → Crear) | **not built** (tareas rows = `no`) | **fix** M2 |
 | **F05** draft an escrito with AI | ~7 clicks, gated Pro/Max (trial 5 consultas) | **not built** (asistente-ia rows = `no`) | **fix** M2+ — out of M1 scope |
-| **F06** digest & notifications | bell (1) → panel opens → unread item (2) → reading; plus e-mail "Resumen diario" | bell is a direct **link** to the page (1) → notification deep-links to the case `?tab=` (2) — F06-E14; **no panel, no digest** | **keep** the direct link (fewer clicks than bell → panel → item); **fix** M2: bell dropdown panel + daily digest + 07:00 reminder jobs |
+| **F06** digest & notifications | bell (1) → panel opens → unread item (2) → reading; plus e-mail "Resumen diario" | bell (1) → dropdown panel with Todas/No leidas (2) → notification deep-links to the case `?tab=` — F06-E14 + bell.spec; **no e-mail digest** | **keep** the panel; **fix** M3: daily digest + 07:00 reminder jobs (Resend) |
 | **WA intake** (our own scope) | n/a — Veredicta has no WhatsApp module | inbox list + status filters + states green (WA02); webhook handshake, `X-Hub-Signature-256`, exactly-once storage, local bot green (WA01/WA03) | **keep**; M3: Meta Graph outbound, 24 h window, appointment booking |
 
 ### Error behaviour
