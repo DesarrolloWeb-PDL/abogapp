@@ -14,12 +14,14 @@ import {
 } from "@/lib/data";
 
 /**
- * Onboarding wizard, steps 1–3 of 5 (S03; steps 4–5 arrive in M2).
+ * Onboarding wizard, all five steps (S03: jurisdictions → pitch → profile →
+ * security → studio; steps 4–5 of the feature arrived in M2).
  * Fresh copy — the reference product's step wording is not reused.
  *
- * Step 1 picks jurisdictions (stored on the study), step 2 keeps the signed
- * profile in sync, step 3 creates the studio via the data layer and lands on
- * the expedientes list. The finish path shows a skeleton, never a spinner.
+ * Step 1 picks jurisdictions (stored on the study), step 3 keeps the signed
+ * profile in sync, step 5 creates the studio via the data layer and lands on
+ * the expedientes list; steps 2 and 4 are informational screens. The finish
+ * path shows a skeleton, never a spinner.
  */
 
 const JURISDICTIONS = [
@@ -33,7 +35,9 @@ const JURISDICTIONS = [
 
 const STEP_TITLES = [
   "¿En qué jurisdicciones trabajás?",
+  "Nosotros te avisamos",
   "Tu perfil",
+  "Tus datos, bien cuidados",
   "Datos del estudio",
 ];
 
@@ -98,7 +102,7 @@ export function OnboardingWizard() {
     if (!EMAIL_PATTERN.test(email.trim())) errors.email = ERROR_COPY.invalid_email;
 
     setProfileErrors(errors);
-    if (Object.keys(errors).length === 0) setStep(3);
+    if (Object.keys(errors).length === 0) setStep(4);
   }
 
   async function finish(event: FormEvent<HTMLFormElement>) {
@@ -175,18 +179,18 @@ export function OnboardingWizard() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <p className="text-sm font-medium text-text-muted">Paso {step} de 3</p>
+        <p className="text-sm font-medium text-text-muted">Paso {step} de 5</p>
         <div
           className="mt-2 h-2 w-full overflow-hidden rounded-pill bg-border"
           role="progressbar"
           aria-valuemin={1}
-          aria-valuemax={3}
+          aria-valuemax={5}
           aria-valuenow={step}
           aria-label="Progreso de la configuración inicial"
         >
           <div
             className="h-full rounded-pill bg-accent transition-[width] duration-base"
-            style={{ width: `${(step / 3) * 100}%` }}
+            style={{ width: `${(step / 5) * 100}%` }}
           />
         </div>
       </div>
@@ -231,6 +235,24 @@ export function OnboardingWizard() {
       {step === 2 && (
         <section className="flex flex-col gap-4">
           <p className="text-base text-text-muted">
+            Mientras vos trabajás en las causas, la plataforma vigila los
+            plazos y te avisa antes de cada vencimiento. Así no dependés de la
+            memoria de nadie.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Button size="lg" onClick={() => setStep(3)}>
+              Continuar
+            </Button>
+            <Button variant="ghost" size="lg" onClick={() => setStep(1)}>
+              Atrás
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {step === 3 && (
+        <section className="flex flex-col gap-4">
+          <p className="text-base text-text-muted">
             Así te vamos a mostrar dentro del estudio y en los avisos que
             reciba el equipo.
           </p>
@@ -257,14 +279,32 @@ export function OnboardingWizard() {
             <Button size="lg" onClick={confirmProfile}>
               Continuar
             </Button>
-            <Button variant="ghost" size="lg" onClick={() => setStep(1)}>
+            <Button variant="ghost" size="lg" onClick={() => setStep(2)}>
               Atrás
             </Button>
           </div>
         </section>
       )}
 
-      {step === 3 && (
+      {step === 4 && (
+        <section className="flex flex-col gap-4">
+          <p className="text-base text-text-muted">
+            La información de tu estudio se guarda de forma segura y solo la
+            gente de tu equipo con acceso puede verla. Así podés trabajar
+            tranquilo.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Button size="lg" onClick={() => setStep(5)}>
+              Continuar
+            </Button>
+            <Button variant="ghost" size="lg" onClick={() => setStep(3)}>
+              Atrás
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {step === 5 && (
         <form onSubmit={finish} noValidate className="flex flex-col gap-5">
           <p className="text-base text-text-muted">
             Último paso: con estos datos creamos tu estudio.
@@ -290,7 +330,7 @@ export function OnboardingWizard() {
             <Button type="submit" size="lg">
               Crear estudio
             </Button>
-            <Button variant="ghost" size="lg" onClick={() => setStep(2)}>
+            <Button variant="ghost" size="lg" onClick={() => setStep(4)}>
               Atrás
             </Button>
           </div>

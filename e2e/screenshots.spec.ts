@@ -62,7 +62,7 @@ test.describe("replica-diff capture — authed screens", () => {
   test("S03 onboarding step 1", async ({ page }) => {
     await ensureSession(page);
     await page.goto("/onboarding");
-    await expect(page.getByText("Paso 1 de 3")).toBeVisible();
+    await expect(page.getByText("Paso 1 de 5")).toBeVisible();
     await page.screenshot({ path: path.join(OUT, "S03-onboarding.png") });
   });
 

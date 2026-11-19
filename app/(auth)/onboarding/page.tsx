@@ -9,7 +9,7 @@ export default function OnboardingPage() {
     <Card>
       <CardHeader
         title="Configuración inicial"
-        description="Tres pasos para dejar tu estudio listo para usar."
+        description="Cinco pasos para dejar tu estudio listo para usar."
       />
       <CardBody>
         <OnboardingWizard />
