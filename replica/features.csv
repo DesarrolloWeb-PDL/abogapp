@@ -14,15 +14,15 @@ Expedientes list with search and filters,expedientes,must,yes,partial,S07 | sear
 Case detail hub with tabs,expedientes,must,yes,partial,S08 | Resumen + Pruebas tabs with ?tab= deep link (F02-E7 refresh keeps it); remaining 8 tabs = M2
 Favorites / archive / soft-delete cases,expedientes,must,yes,yes,S07 row menu and bulk bar; favorites are studio-wide | M2 shipped: star + archivar/desarchivar + soft-delete tras confirm + barra bulk (e2e m2-expedientes)
 Vista general cross-case matrix,expedientes,could,yes,no,S15; read-only by design; thin evidence
-Case stages (etapas) settings,expedientes,should,yes,no,S30 settings page | M2; the case form already consumes seeded stages (lib/data/stages; stages.test.ts)
+Case stages (etapas) settings,expedientes,should,yes,yes,S30 settings page | M2 shipped: CRUD + orden + counts_as_active + last-stage guard en /configuracion/etapas (e2e s30 H1)
 Manual movement log per case,movimientos,must,yes,yes,S09; hand-entered history distinct from portal actuaciones | M2 shipped: list + create + pin + tipo/range/search filters + all states (e2e m2-movimientos)
 Actuaciones list with estado chips,movimientos,should,yes,no,S10; synced cases only; 7 estado values
 In-app document reader with citations,movimientos,should,yes,no,S11; J and K navigation; Copiar cita with page
 Novedades judiciales feed (two views),movimientos,should,yes,no,S05 and S06; por expediente / por novedad
 Pruebas tracking (six evidence types),pruebas,must,yes,partial,S12 | create prueba (tipo; titulo; informante; fecha efectiva; plazo) with fecha limite from the engine; F03-H1 green (form -> DB -> badge); per-type estados; person picker; historial = M2
 Plazos engine (horas / corridos / habiles),plazos,must,yes,yes,F03 | lib/plazos mirrors compute_fecha_limite(); 21 golden tests + F03-H1 DB trigger cross-check vs independent computation
-Feriados + feria + dias inhabiles calendar,plazos,must,yes,partial,F03; January and July judicial feria; provincial holidays never count | M1: engine honours system + studio days and generates feria; settings UI (S30) and official 2026/27 feriados in M2 (TODO(gap))
-Dias inhabiles settings (system + studio),plazos,must,yes,no,S30 dias-inhabiles; feeds the deadline engine | M2
+Feriados + feria + dias inhabiles calendar,plazos,must,yes,partial,F03; January and July judicial feria; provincial holidays never count | M1 engine honours system + studio days; S30 settings UI shipped (M2); official 2026/27 feriados still TODO(gap)
+Dias inhabiles settings (system + studio),plazos,must,yes,yes,S30 dias-inhabiles; feeds the deadline engine | M2 shipped: /configuracion/dias-inhabiles con origen Del sistema / De tu estudio + loader (e2e s30 H2)
 Deadline countdown color states,plazos,should,yes,no,S12; green / amber <=48h / red vencido | clone badge is plain text today (case-detail-view); no colour states
 Standalone deadline calculator tool,plazos,should,yes,no,S34 /tool/deadline-calculator; free on every plan
 Plazo reminder notifications (day-before / day-of),plazos,must,yes,no,F03 and F06; 07:00 to all members | M2 (Inngest jobs); clone only writes a creation-time in-app notification (F03-H1)

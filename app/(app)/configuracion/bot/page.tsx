@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ConfiguracionNav } from "../section-nav";
 import { BotSettingsView } from "./bot-settings-view";
 
 export const metadata: Metadata = { title: "Configuración del bot" };
@@ -7,10 +8,12 @@ export const metadata: Metadata = { title: "Configuración del bot" };
  * WhatsApp bot settings (/configuracion/bot) — Unit 1 of the WhatsApp
  * phase: the study edits the bot's message strings instead of the copy that
  * used to be hardcoded in lib/data/bot.ts, and switches the bot on/off.
+ * The section tabs are the way to the S30 screens (Etapas, Días inhábiles).
  */
 export default function ConfiguracionBotPage() {
   return (
     <div className="flex flex-col gap-6">
+      <ConfiguracionNav />
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-bold text-text">Configuración del bot</h1>
         <p className="text-base text-text-muted">

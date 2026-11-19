@@ -52,8 +52,19 @@ export {
   type SortDirection,
 } from "./cases";
 
-// Case stages / etapas (S07 form + S30 settings)
-export { listStages, type CaseStage } from "./stages";
+// Case stages / etapas (S07 form + S30 settings admin)
+export {
+  createStage,
+  deleteStage,
+  listStages,
+  moveStage,
+  renameStage,
+  setStageCountsAsActive,
+  STAGE_NAME_MAX,
+  type CaseStage,
+  type CreateStageInput,
+  type StageMoveDirection,
+} from "./stages";
 
 // Pruebas + plazos (S12) — fecha límite always computed by lib/plazos.
 export { createPrueba, listPruebas, type CreatePruebaInput } from "./pruebas";
@@ -141,7 +152,20 @@ export { DataLayerError, ERROR_COPY, errorCopy, type DataErrorCode } from "./err
 
 // Seam contract for S12: the add-prueba form receives the non-working days
 // from here and hands them to computeFechaLimite — it never computes dates.
-export { nonWorkingDays } from "./calendar";
+// The S30 admin writes the study's own días inhábiles through the same
+// module, and loadNonWorkingDays() keeps the shared set truthful.
+export {
+  addStudioDay,
+  listStudioDays,
+  listSystemDays,
+  loadNonWorkingDays,
+  nonWorkingDays,
+  removeStudioDay,
+  type AddStudioDayInput,
+  type CalendarDay,
+  type CalendarDayKind,
+  type CalendarDayOrigen,
+} from "./calendar";
 
 // WhatsApp webhook (T8) — signature, payload parsing and the idempotent loop.
 export {

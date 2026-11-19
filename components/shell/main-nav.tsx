@@ -65,7 +65,12 @@ function NavList({ activePath, collapsed }: NavListProps) {
         Principal
       </p>
       {mainNavItems.map((item) => {
-        const active = isActivePath(activePath, item.href);
+        // The Configuracion entry is section-aware: any /configuracion/* screen
+        // keeps it highlighted (bot, etapas, dias-inhabiles).
+        const active = isActivePath(
+          activePath,
+          item.href === "/configuracion/bot" ? "/configuracion" : item.href,
+        );
         const Icon = item.icon;
         const unread = item.showsUnread ? count : 0;
 
