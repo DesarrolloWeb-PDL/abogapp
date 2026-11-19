@@ -178,6 +178,26 @@ export {
   type CalendarDayOrigen,
 } from "./calendar";
 
+// Agenda (S17) — T1 events data layer: windowed reads + shared filter predicate.
+export {
+  applyEventFilters,
+  compareEventsByStart,
+  isEventSource,
+  listEventCategories,
+  listEvents,
+  listEventsByCase,
+  listUpcomingEvents,
+  upcomingEventWindow,
+  EVENT_SOURCES,
+  EVENT_TITLE_MAX,
+  UPCOMING_DAYS,
+  type CalendarEvent,
+  type EventCategory,
+  type EventListFilter,
+  type EventSource,
+  type UpcomingEventsFilter,
+} from "./events";
+
 // WhatsApp webhook (T8) — signature, payload parsing and the idempotent loop.
 export {
   parseInboundMessages,
