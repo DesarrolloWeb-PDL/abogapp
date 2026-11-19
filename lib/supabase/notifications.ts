@@ -276,8 +276,10 @@ export function clearInAppPreferenceCache(): void {
  * a cache hit answers with no I/O; a miss reads the row once (RLS-scoped);
  * ANY read failure answers `true`. Fail-open is deliberate: a broken
  * preference read must never silently drop an alert the user may want.
+ * Exported for the emitters that write a raw bucket themselves (the task
+ * alert in lib/supabase/tasks.ts keeps `tareas` instead of mapping).
  */
-async function isInAppEnabled(
+export async function isInAppEnabled(
   userId: string,
   category: string,
 ): Promise<boolean> {

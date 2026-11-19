@@ -39,7 +39,7 @@ File preview and version list,documentos,should,yes,no,S19; thin evidence
 Protected folders and permission padlock,documentos,should,yes,no,S18; system documents / pruebas / assistant attachments
 In-app notification panel and page,notificaciones,must,yes,partial,S21 | page + header bell + read-on-click deep links + mark-all + search + estado/categoria filters + Cargar mas (20/page) + Preferencias modal shipped (e2e m2-notificaciones); pending: bell dropdown panel with Todas/No leidas tabs
 Daily email digest Mon-Fri 08:00,notificaciones,must,yes,no,F06 Resumen diario | M2 (Resend + jobs not in M1)
-Notification preferences per category,notificaciones,should,yes,partial,S21 Preferencias modal + store + emission gate shipped (fails open on read errors); task-alert insert bypasses the gate - fix in flight
+Notification preferences per category,notificaciones,should,yes,yes,S21 Preferencias modal + store + gate en ambas costuras (incluye task alerts tras el fix) + fail-open (e2e M2-S21 + unit)
 Web push (desktop + Android),notificaciones,could,yes,no,F06; no iOS push so email digest only
 AI assistant chat with page-level citations,asistente-ia,could,yes,no,S22; effort selector + skills via / + step log
 AI drafting split view (Redactar escritos),asistente-ia,could,yes,no,F05; draft versions + Guardar en Documentos

@@ -55,7 +55,7 @@ import {
   resetFakeTasks,
   updateTask,
 } from "./tasks";
-import { onNotification } from "./notifications";
+import { clearNotificationPreferenceCache, onNotification } from "./notifications";
 import { getSession, signUp } from "./auth";
 import { createStudy } from "./studies";
 import { DataLayerError, errorCopy } from "./errors";
@@ -123,6 +123,9 @@ beforeEach(() => {
   // the module-local task list must never leak between tests either.
   resetDataStore();
   resetFakeTasks();
+  // The S21 emission gate caches `tareas` answers module-wide: a pause (or
+  // an "allowed") written by one case must never gate the next one's alert.
+  clearNotificationPreferenceCache();
   calls.length = 0;
   responses.clear();
   fromMock.mockReset();
@@ -520,6 +523,12 @@ describe("supabase driver", () => {
       },
       error: null,
     });
+    // Emission gate (S21): in_app ON for the `tareas` bucket → the insert
+    // must run and write exactly what it wrote before the gate existed.
+    queueResponse("notification_preferences", {
+      data: { in_app: true },
+      error: null,
+    });
 
     const emitted: AppNotification[] = [];
     const unsubscribe = onNotification((notification) =>
@@ -561,6 +570,8 @@ describe("supabase driver", () => {
 
     // The alert is app-side (no trigger writes notifications) and carries the
     // idempotency key the reminder jobs share: task:<id>.
+    // The alert still lands on the RAW `tareas` bucket (never a mapped app
+    // category: that would move it to the Plazos chip on read).
     const notifWrite = calls.find((call) => call.table === "notifications");
     expect(notifWrite?.steps[0]).toEqual({
       name: "insert",
@@ -577,11 +588,143 @@ describe("supabase driver", () => {
         },
       ],
     });
+    // The gate asked the SAME bucket the row writes, for the same user.
+    const gateRead = calls.find(
+      (call) => call.table === "notification_preferences",
+    );
+    expect(gateRead?.steps).toContainEqual({
+      name: "eq",
+      args: ["category", "tareas"],
+    });
+    expect(gateRead?.steps).toContainEqual({
+      name: "eq",
+      args: ["user_id", "user-1"],
+    });
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ categoria: "Sistema", enlace: "/tareas" });
 
     // The fake driver's module-local list never took the write.
     expect(peekFakeTasks()).toHaveLength(0);
+  });
+
+  it("createTask with the tareas preference paused writes NO alert and emits nothing (S21 gate)", async () => {
+    queueMembership();
+    queueResponse("task_statuses", {
+      data: {
+        id: "status-1",
+        key: "pendiente",
+        name: "Pendiente",
+        position: 1,
+        is_default: true,
+      },
+      error: null,
+    });
+    queueResponse("tasks", {
+      data: {
+        ...OPEN_TASK_ROW,
+        id: "task-10",
+        titulo: "Tarea en silencio",
+        prioridad: "sin_prioridad",
+        case_id: null,
+        vence_at: null,
+        case: null,
+      },
+      error: null,
+    });
+    // The gate reads the `tareas` bucket and comes back paused. NO
+    // `notifications` response is queued: an insert would throw here.
+    queueResponse("notification_preferences", {
+      data: { in_app: false },
+      error: null,
+    });
+
+    const emitted: AppNotification[] = [];
+    const unsubscribe = onNotification((notification) =>
+      emitted.push(notification),
+    );
+    const task = await createTask({ titulo: "Tarea en silencio" });
+    unsubscribe();
+
+    // The task itself is never held hostage by the alert gate.
+    expect(task).toMatchObject({ id: "task-10", responsableId: "user-1" });
+
+    // The gate asked the bucket this row would have written, for this user.
+    const gateRead = calls.find(
+      (call) => call.table === "notification_preferences",
+    );
+    expect(gateRead?.steps).toContainEqual({
+      name: "eq",
+      args: ["category", "tareas"],
+    });
+    expect(gateRead?.steps).toContainEqual({
+      name: "eq",
+      args: ["user_id", "user-1"],
+    });
+
+    // Zero rows on notifications and a silent local emit seam.
+    expect(calls.filter((call) => call.table === "notifications")).toHaveLength(0);
+    expect(emitted).toHaveLength(0);
+  });
+
+  it("createTask fails open: a broken preference read still writes the alert", async () => {
+    queueMembership();
+    queueResponse("task_statuses", {
+      data: {
+        id: "status-1",
+        key: "pendiente",
+        name: "Pendiente",
+        position: 1,
+        is_default: true,
+      },
+      error: null,
+    });
+    queueResponse("tasks", {
+      data: {
+        ...OPEN_TASK_ROW,
+        id: "task-11",
+        titulo: "Tarea con gate roto",
+        prioridad: "sin_prioridad",
+        case_id: null,
+        vence_at: null,
+        case: null,
+      },
+      error: null,
+    });
+    // The preference read itself fails (network, RLS denial…): the gate
+    // must answer "allowed" — a broken read never silently drops an alert.
+    queueResponse("notification_preferences", {
+      data: null,
+      error: { message: "boom" },
+    });
+    queueResponse("notifications", {
+      data: {
+        id: "notif-11",
+        study_id: "study-9",
+        user_id: "user-1",
+        category: "tareas",
+        title: "Tarea asignada: «Tarea con gate roto»",
+        body: "Quedó en Pendiente.",
+        deep_link: "/tareas",
+        read_at: null,
+        created_at: "2026-11-18T12:10:00.000Z",
+      },
+      error: null,
+    });
+
+    const emitted: AppNotification[] = [];
+    const unsubscribe = onNotification((notification) =>
+      emitted.push(notification),
+    );
+    await createTask({ titulo: "Tarea con gate roto" });
+    unsubscribe();
+
+    const notifCalls = calls.filter((call) => call.table === "notifications");
+    expect(notifCalls).toHaveLength(1);
+    expect(notifCalls[0]?.steps[0]).toMatchObject({
+      name: "insert",
+      args: [{ category: "tareas", dedupe_key: "task:task-11" }],
+    });
+    expect(emitted).toHaveLength(1);
   });
 
   it("createTask rejects invalid input before any query", async () => {
@@ -639,6 +782,11 @@ describe("supabase driver", () => {
       },
       error: null,
     });
+    // Gate reads `tareas` → in_app ON, so the assignment alert proceeds.
+    queueResponse("notification_preferences", {
+      data: { in_app: true },
+      error: null,
+    });
 
     const emitted: AppNotification[] = [];
     const unsubscribe = onNotification((notification) =>
@@ -684,6 +832,39 @@ describe("supabase driver", () => {
       ],
     });
     expect(emitted).toHaveLength(1);
+  });
+
+  it("updateTask with the tareas preference paused writes NO assignment alert", async () => {
+    queueMembership();
+    queueResponse("tasks", {
+      data: { id: "task-1", responsable_id: null },
+      error: null,
+    });
+    queueResponse("tasks", {
+      data: { ...OPEN_TASK_ROW, responsable_id: "user-1" },
+      error: null,
+    });
+    // Paused bucket, and NO `notifications` response: pre-fix the insert
+    // runs (and the caller's try/catch would swallow its throw — the
+    // recorded call is what must stay at zero).
+    queueResponse("notification_preferences", {
+      data: { in_app: false },
+      error: null,
+    });
+
+    const emitted: AppNotification[] = [];
+    const unsubscribe = onNotification((notification) =>
+      emitted.push(notification),
+    );
+    const updated = await updateTask("task-1", { responsableId: "user-1" });
+    unsubscribe();
+
+    expect(updated).toMatchObject({ responsableId: "user-1" });
+    expect(
+      calls.filter((call) => call.table === "notification_preferences"),
+    ).toHaveLength(1);
+    expect(calls.filter((call) => call.table === "notifications")).toHaveLength(0);
+    expect(emitted).toHaveLength(0);
   });
 
   it("updateTask rejects an empty patch before touching the network", async () => {

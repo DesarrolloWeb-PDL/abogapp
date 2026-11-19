@@ -30,6 +30,7 @@ import { toArtIsoDate } from "@/lib/data/calendar";
 import { getMyStudy, requireStudy } from "@/lib/data/studies";
 import { formatDate } from "@/lib/format";
 import { getBrowserClient } from "./client";
+import { isInAppEnabled } from "./notifications";
 
 // --- mirrors of lib/data/tasks.ts (see the header note) ---------------------
 const TASK_PRIORIDADES: readonly string[] = [
@@ -308,11 +309,19 @@ export async function updateTaskSupabase(
 
 /**
  * Insert one task alert for the signed-in user, mirroring
- * insertNotificationSupabase — except for the category: this row uses the
- * DB's `tareas` bucket, which the read-collapse already maps to the app's
- * "Sistema" chip (lib/supabase/notifications.ts CATEGORY_FROM_DB). The
- * shared insert helper only speaks the four app categories, so the mapping
- * lives here. `dedupe_key` feeds the (user_id, dedupe_key) unique
+ * insertNotificationSupabase — including its emission gate (S21): the row
+ * only lands while the `tareas` preference bucket allows in-app alerts
+ * (the same bucket PREFERENCE_CATEGORY.Sistema names, see
+ * lib/supabase/notifications.ts), and a preference read that fails opens
+ * so a broken read never drops an alert. Paused → `null` comes back and the
+ * caller's `emitNotification(null)` stays silent, exactly like the pruebas
+ * path.
+ *
+ * The row still writes the RAW `tareas` bucket rather than going through
+ * insertNotificationSupabase: that helper only speaks the four app
+ * categories and would write `sistemas_judiciales`, which the read-collapse
+ * (CATEGORY_FROM_DB) would show under the "Plazos" chip instead of
+ * "Sistema". `dedupe_key` feeds the (user_id, dedupe_key) unique
  * constraint: a retried emission stays idempotent, like the pruebas alert.
  */
 async function insertTaskNotification(input: {
@@ -321,7 +330,13 @@ async function insertTaskNotification(input: {
   taskId: string;
   titulo: string;
   detalle: string;
-}): Promise<AppNotification> {
+}): Promise<AppNotification | null> {
+  // Emission gate first: with "Tareas" paused in Preferencias no row is
+  // written and no local seam fires — the alert is simply skipped.
+  if (!(await isInAppEnabled(input.userId, "tareas"))) {
+    return null;
+  }
+
   const supabase = getBrowserClient();
 
   const { data: row, error } = await supabase
