@@ -10,10 +10,14 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import {
   UPCOMING_DAYS,
   listEventCategories,
+  listEvents,
   listEventsByCase,
   listUpcomingEvents,
+  loadNonWorkingDays,
+  nonWorkingDays,
   type EventCategory,
 } from "@/lib/data";
+import { toArtIsoDate } from "@/lib/data/calendar";
 import {
   DEFAULT_AGENDA_FILTERS,
   SOURCE_FILTER_OPTIONS,
@@ -30,6 +34,18 @@ import {
   type AgendaFilterChip,
   type AgendaFilters,
 } from "./agenda-list";
+import {
+  agendaPeriodTitle,
+  agendaPeriodWindow,
+  agendaShortcutAction,
+  availableAgendaViews,
+  clampAgendaView,
+  shiftAgendaPeriod,
+  type AgendaDayToggles,
+  type AgendaViewKind,
+} from "./agenda-periods";
+import { AgendaTimeGrid, AgendaMonthGrid, AgendaYearGrid } from "./agenda-grids";
+import { AgendaTopBar, useAgendaNarrowViewport } from "./agenda-top-bar";
 
 /**
  * Agenda Lista panel (S17) — the list surface shared by `/agenda` (T2,
@@ -37,6 +53,14 @@ import {
  * in Lista). `caseId` picks the reader: absent → listUpcomingEvents (the
  * study window), present → listEventsByCase (same window pinned to the
  * route's expediente). One panel, one copy, two scopes — never a fork.
+ *
+ * T4 added the top bar on top of that: the Día/Semana/Mes/Año/Lista
+ * selector (D/S/M/A/L + H shortcuts), ‹ › period navigation with Hoy, and
+ * the Fines de semana / Días inhábiles toggles. The view defaults to Lista
+ * on BOTH surfaces (recon: the case tab "opens in Lista") and clamps to
+ * Lista/Día below 768px (recon: "mobile: Lista or Día only (no Año)").
+ * Period views read `listEvents` over `agendaPeriodWindow`'s bounds —
+ * adjacent periods tile, so ‹ › never gaps or duplicates a row.
  *
  * Load discipline follows the notificaciones page: the effect only starts
  * reads and every state write lands in a promise callback
@@ -47,10 +71,13 @@ import {
  *
  * Category checkboxes render only while `listEventCategories()` returns
  * rows: the six default names/11 colors are an evidence gap (init.sql
- * TODO(gap), T6 seeds them), so nothing here invents them.
+ * TODO(gap), T6 seeds them), so nothing here invents them. The toggles
+ * shade weekends and dated non-working days from `nonWorkingDays` (loaded
+ * once per mount) — holidays are never hardcoded here either.
  *
  * The page header (h1 + subtitle) belongs to the caller: the tab renders
  * its own h2 under the case's h1, this panel never owns an heading level.
+ * The top bar's period title IS this panel's h2.
  */
 
 const CHECKBOX_CLASSES =
@@ -73,6 +100,34 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
   // Newest-request token: only the latest read may write state.
   const requestRef = useRef(0);
 
+  // --- T4 period views -------------------------------------------------
+  // The rendered view is DERIVED: rawView survives a resize that outlaws
+  // it (back to wide → the old view returns), while the narrow screen only
+  // ever shows Lista/Día (recon: "mobile: Lista or Día only (no Año)").
+  const narrow = useAgendaNarrowViewport();
+  const [rawView, setRawView] = useState<AgendaViewKind>("lista");
+  const view = clampAgendaView(rawView, narrow);
+  const views = availableAgendaViews(narrow);
+  // The anchor is an ART day: ‹ › shift it per view, H resets it to today.
+  // Both surfaces boot on Lista with today's anchor (recon: case tab
+  // "opens in Lista"). SSR and hydration agree unless the ART date rolls
+  // over between the two renders — the same window every "today" widget
+  // accepts, and the grids themselves only render after the first fetch
+  // (purely client-side), so they never hydrate.
+  const [anchor, setAnchor] = useState<string>(() => toArtIsoDate(new Date()));
+  const [showWeekends, setShowWeekends] = useState(true);
+  const [showNonWorkingDays, setShowNonWorkingDays] = useState(true);
+  // Dated non-working days (feria/feriado/studio rows): the shared module
+  // set already holds the static feria until loadNonWorkingDays() answers;
+  // a copy (not the live set) so a load always re-renders the grids.
+  const [inhabilDays, setInhabilDays] = useState<ReadonlySet<string>>(
+    () => new Set(nonWorkingDays),
+  );
+  const dayToggles: AgendaDayToggles = {
+    weekends: showWeekends,
+    nonWorkingDays: showNonWorkingDays,
+  };
+
   const fetchEvents = useCallback(
     (snapshot: AgendaFilters) => {
       const requestId = ++requestRef.current;
@@ -84,11 +139,21 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
       Promise.resolve().then(() => {
         if (requestId === requestRef.current) dispatch({ type: "load" });
       });
-      // Same window, one scope: the case tab pins it to its expediente
-      // (listEventsByCase), /agenda reads the whole study.
-      const read = caseId
-        ? listEventsByCase(caseId, toEventListFilter(snapshot))
-        : listUpcomingEvents(toEventListFilter(snapshot));
+      const criteria = toEventListFilter(snapshot);
+      // Lista keeps the driver's upcoming window; the period views read
+      // their own half-open bounds (adjacent periods tile — ‹ › never gaps
+      // or duplicates a row), both scopes pinned by caseId when present.
+      const period = agendaPeriodWindow(view, anchor);
+      const read = period
+        ? listEvents({
+            ...criteria,
+            ...(caseId ? { caseId } : {}),
+            from: period.from,
+            to: period.to,
+          })
+        : caseId
+          ? listEventsByCase(caseId, criteria)
+          : listUpcomingEvents(criteria);
       read
         .then((events) => {
           if (requestId !== requestRef.current) return;
@@ -99,7 +164,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
           dispatch({ type: "failure" });
         });
     },
-    [caseId],
+    [caseId, view, anchor],
   );
 
   // Categories load once per mount; a failure only hides the (still empty
@@ -110,9 +175,36 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
       .catch(() => setCategories([]));
   }, []);
 
+  // Dated non-working days load once per mount too; a failure keeps the
+  // static feria set already in hand (the grids degrade, never crash).
+  const fetchNonWorkingDays = useCallback(() => {
+    loadNonWorkingDays()
+      .then((days) => setInhabilDays(new Set(days)))
+      .catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     fetchCategories();
-  }, [fetchCategories]);
+    fetchNonWorkingDays();
+  }, [fetchCategories, fetchNonWorkingDays]);
+
+  // D/S/M/A/L + H (recon shortcuts): quiet while a modifier is held or the
+  // user is typing (the search box keeps every letter), and a narrow
+  // screen refuses the views it does not offer.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const action = agendaShortcutAction(event, document.activeElement, narrow);
+      if (!action) return;
+      event.preventDefault();
+      if (action.type === "today") {
+        setAnchor(toArtIsoDate(new Date()));
+        return;
+      }
+      setRawView(action.view);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [narrow]);
 
   const { sources, categoryIds } = filters;
   useEffect(() => {
@@ -146,7 +238,28 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
 
   function retry() {
     fetchCategories();
+    fetchNonWorkingDays();
     fetchEvents({ search: debouncedSearch, sources, categoryIds });
+  }
+
+  const periodTitle = agendaPeriodTitle(view, anchor, UPCOMING_DAYS);
+  // Rendered only inside the grids (post-fetch), but kept here so both
+  // surfaces read the same clock.
+  const today = toArtIsoDate(new Date());
+
+  function goPrev() {
+    setAnchor((prev) => shiftAgendaPeriod(view, prev, -1));
+  }
+
+  function goNext() {
+    setAnchor((prev) => shiftAgendaPeriod(view, prev, 1));
+  }
+
+  /** The month grid's "+N más": open that day in Día view (T5 adds the
+   *  event popover on top; the overflow itself is recon-documented). */
+  function openDay(day: string) {
+    setAnchor(day);
+    setRawView("dia");
   }
 
   const ready = state.status === "ready" ? state : null;
@@ -157,6 +270,21 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <AgendaTopBar
+        view={view}
+        views={views}
+        title={periodTitle}
+        navDisabled={view === "lista"}
+        showWeekends={showWeekends}
+        showNonWorkingDays={showNonWorkingDays}
+        onSwitchView={setRawView}
+        onPrev={goPrev}
+        onNext={goNext}
+        onToday={() => setAnchor(toArtIsoDate(new Date()))}
+        onToggleWeekends={setShowWeekends}
+        onToggleNonWorkingDays={setShowNonWorkingDays}
+      />
+
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-56 flex-1 flex-col gap-2 sm:max-w-lg">
           <span className="text-sm font-semibold text-text">
@@ -295,7 +423,9 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
       {ready !== null && ready.events.length === 0 && !active && (
         <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface px-6 py-12 text-center">
           <p className="text-base text-text-muted">
-            Todavía no hay eventos en los próximos {UPCOMING_DAYS} días.
+            {view === "lista"
+              ? `Todavía no hay eventos en los próximos ${UPCOMING_DAYS} días.`
+              : "No hay eventos en este período."}
           </p>
         </div>
       )}
@@ -319,58 +449,91 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
             </>
           )}
 
-          {groupByDay(ready.events).map((group) => (
-            <section key={group.day} className="flex flex-col gap-2">
-              <h2 className="text-xs font-medium uppercase tracking-wide text-text-muted">
-                {formatDayHeading(group.day)}
-              </h2>
-              <ul className="flex flex-col gap-3">
-                {group.events.map((event) => (
-                  <li
-                    key={event.id}
-                    className="flex min-h-11 flex-col gap-1.5 rounded-lg border border-border bg-surface px-4 py-4 shadow-card"
-                  >
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
-                      <span className="tabular-nums">
-                        {formatTimeRange(event.startAt, event.endAt)}
-                      </span>
-                      {event.source !== "manual" && (
-                        <Badge tone={sourceTone(event.source)}>
-                          {SOURCE_LABELS[event.source]}
-                        </Badge>
-                      )}
-                      {event.category && (
-                        <Badge tone="neutral">
-                          <span
-                            aria-hidden="true"
-                            className="size-1.5 rounded-full"
-                            style={{ backgroundColor: event.category.color }}
-                          />
-                          {event.category.name}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-base font-semibold text-text">
-                      {event.title}
-                    </p>
-                    {event.location && (
-                      <p className="text-base text-text-muted">
-                        {event.location}
+          {view === "lista" &&
+            groupByDay(ready.events).map((group) => (
+              <section key={group.day} className="flex flex-col gap-2">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                  {formatDayHeading(group.day)}
+                </h2>
+                <ul className="flex flex-col gap-3">
+                  {group.events.map((event) => (
+                    <li
+                      key={event.id}
+                      className="flex min-h-11 flex-col gap-1.5 rounded-lg border border-border bg-surface px-4 py-4 shadow-card"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+                        <span className="tabular-nums">
+                          {formatTimeRange(event.startAt, event.endAt)}
+                        </span>
+                        {event.source !== "manual" && (
+                          <Badge tone={sourceTone(event.source)}>
+                            {SOURCE_LABELS[event.source]}
+                          </Badge>
+                        )}
+                        {event.category && (
+                          <Badge tone="neutral">
+                            <span
+                              aria-hidden="true"
+                              className="size-1.5 rounded-full"
+                              style={{ backgroundColor: event.category.color }}
+                            />
+                            {event.category.name}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-base font-semibold text-text">
+                        {event.title}
                       </p>
-                    )}
-                    {event.caseId && event.caseCaratula && (
-                      <Link
-                        href={`/expedientes/${event.caseId}`}
-                        className={LINK_CLASSES}
-                      >
-                        {event.caseCaratula}
-                      </Link>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+                      {event.location && (
+                        <p className="text-base text-text-muted">
+                          {event.location}
+                        </p>
+                      )}
+                      {event.caseId && event.caseCaratula && (
+                        <Link
+                          href={`/expedientes/${event.caseId}`}
+                          className={LINK_CLASSES}
+                        >
+                          {event.caseCaratula}
+                        </Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+
+          {(view === "dia" || view === "semana") && (
+            <AgendaTimeGrid
+              mode={view}
+              anchor={anchor}
+              events={ready.events}
+              today={today}
+              toggles={dayToggles}
+              nonWorkingDays={inhabilDays}
+            />
+          )}
+
+          {view === "mes" && (
+            <AgendaMonthGrid
+              anchor={anchor}
+              events={ready.events}
+              today={today}
+              toggles={dayToggles}
+              nonWorkingDays={inhabilDays}
+              onOpenDay={openDay}
+            />
+          )}
+
+          {view === "anio" && (
+            <AgendaYearGrid
+              anchor={anchor}
+              events={ready.events}
+              today={today}
+              toggles={dayToggles}
+              nonWorkingDays={inhabilDays}
+            />
+          )}
         </div>
       )}
     </div>

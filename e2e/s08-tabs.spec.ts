@@ -5,6 +5,7 @@ import {
   guardPage,
   restGet,
   restSend,
+  toArtDate,
 } from "./helpers";
 
 /**
@@ -186,6 +187,55 @@ test.describe("S08 case detail tabs", () => {
         page.getByRole("listitem").filter({ hasText: studyTitle }),
       ).toHaveCount(1);
 
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
+  test("S08-T3 Agenda tab: opens in Lista, may switch views, keeps the case scope", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const scopedTitle = `${EVENT_PREFIX}${stamp} scoped`;
+    const studyTitle = `${EVENT_PREFIX}${stamp} study`;
+    const artToday = toArtDate(new Date().toISOString());
+
+    try {
+      await cleanSeededEvents();
+      // Both rows TODAY: the Día/Semana views under test show today's week.
+      await seedAgendaEvent({
+        title: scopedTitle,
+        startAt: `${artToday}T14:00:00.000-03:00`,
+        caseId: SEED.gomezId,
+      });
+      await seedAgendaEvent({
+        title: studyTitle,
+        startAt: `${artToday}T15:00:00.000-03:00`,
+      });
+
+      await page.goto(`/expedientes/${SEED.gomezId}?tab=agenda`);
+      // T3's contract still holds with the T4 top bar: it OPENS in Lista.
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+
+      // The scoped version is the same calendar: it may switch views, and
+      // every view keeps the case filter (the study row never appears).
+      await page.keyboard.press("d");
+      await expect(
+        page.getByRole("button", { name: "Día", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(scopedTitle)).toBeVisible();
+      await expect(page.getByText(studyTitle)).toHaveCount(0);
+
+      await page.keyboard.press("s");
+      await expect(page.getByRole("heading", { name: /Semana \d+/ })).toBeVisible();
+      await expect(page.getByText(scopedTitle)).toBeVisible();
+      await expect(page.getByText(studyTitle)).toHaveCount(0);
+
+      await expectNoAxeViolations(page, "/expedientes/[id] ?tab=agenda week (S08)");
       await guard.assertClean();
     } finally {
       await cleanSeededEvents();
