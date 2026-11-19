@@ -116,7 +116,7 @@ test.describe("F03 prueba with días-hábiles plazo", () => {
     //    run's row (older runs leave same-dated notifications behind, so the
     //    item is scoped by the unique título).
     await expect(
-      page.getByRole("link", { name: /Notificaciones, \d+ sin leer/ }),
+      page.getByRole("button", { name: /Notificaciones, \d+ sin leer/ }),
     ).toBeVisible();
     await page.goto("/notificaciones");
     const ownItem = page.getByRole("listitem").filter({ hasText: titulo });

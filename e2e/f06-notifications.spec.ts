@@ -204,6 +204,26 @@ test.describe("F06 notifications page", () => {
       30,
     );
     expect(reachedBell, "bell reachable by keyboard").toBe(true);
+    // Enter on the bell opens the dropdown panel (M2 T3); the full page is
+    // reached through the panel's footer link, still with the keyboard only.
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("dialog", { name: "Notificaciones" }),
+    ).toBeVisible();
+    const reachedFooter = await tabUntil(
+      page,
+      () => {
+        const active = document.activeElement as HTMLAnchorElement | null;
+        return (
+          active?.tagName === "A" &&
+          (active.textContent ?? "").trim() === "Ver la lista completa"
+        );
+      },
+      60,
+    );
+    expect(reachedFooter, "panel footer link reachable by keyboard").toBe(
+      true,
+    );
     await page.keyboard.press("Enter");
     await page.waitForURL("**/notificaciones");
     await expect(
