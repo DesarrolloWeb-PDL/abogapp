@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { CalendarEvent } from "@/lib/data";
 import { formatDate } from "@/lib/format";
 import {
@@ -19,14 +25,21 @@ import {
   type AgendaDayToggles,
   type AgendaMonthCell,
 } from "./agenda-periods";
+import {
+  formatSlotHint,
+  slotRangeFromOffsets,
+  type SlotRange,
+} from "./agenda-event-editor";
 
 /**
  * The four period views' grids (S17 T4): the shared 24-hour time grid
  * behind Día (one column) and Semana (seven columns, red now-line +
  * "Inhábil" labels), the Mes grid ("+N más" overflow opens that day) and
- * the Año heat map (dots per day). Rendering only — event popovers and the
- * Día free-slot drag-create ("Libre de… · arrastrá para crear") belong to
- * T5, so nothing here is draggable and event blocks are static content.
+ * the Año heat map (dots per day). Rendering only — event blocks are
+ * static content and the detail popover belongs to the panel. T5a adds
+ * the Día free-slot layer below ("Libre de… · arrastrá para crear"):
+ * hover hints the snapped slot, a drag (or a plain click) hands the
+ * 15-minute-snapped range to the panel, Enter is the keyboard fallback.
  *
  * Layout values Tailwind cannot express (grid template, %/px tops) travel
  * as inline styles; every colour is a theme role. Day state (weekend
@@ -76,6 +89,10 @@ interface AgendaTimeGridProps extends AgendaGridProps {
   anchor: string;
   /** Opens the detail popover for a clicked event block (T5a). */
   onSelectEvent?: (event: CalendarEvent, trigger: HTMLElement) => void;
+  /** Día free-slot (T5a): the panel opens the create form for the dragged
+   *  or clicked range; an absent range is the keyboard fallback (the day's
+   *  default prefill). Semana never wires it — recon documents Día only. */
+  onCreateSlot?: (day: string, range?: SlotRange) => void;
 }
 
 /**
@@ -83,7 +100,9 @@ interface AgendaTimeGridProps extends AgendaGridProps {
  * absolutely positioned by `agendaEventPlacement` and split into lanes by
  * `agendaEventLanes`. The red now-line (recon: "Week red now-line") sits
  * over the columns for the current day's week only — decorative, so it is
- * computed after mount and never disagrees with the SSR markup.
+ * computed after mount and never disagrees with the SSR markup, and it
+ * never takes a pointer (a 2px line must not swallow presses on the layer
+ * or the event blocks under it).
  */
 export function AgendaTimeGrid({
   mode,
@@ -93,6 +112,7 @@ export function AgendaTimeGrid({
   toggles,
   nonWorkingDays,
   onSelectEvent,
+  onCreateSlot,
 }: AgendaTimeGridProps) {
   const days = mode === "dia" ? [anchor] : agendaWeekDays(anchor);
   const bucketed = agendaBucketByDay(events, days);
@@ -149,7 +169,7 @@ export function AgendaTimeGrid({
         {nowFraction !== null && todayIndex !== -1 && (
           <div
             aria-hidden="true"
-            className="absolute inset-x-0 z-10 h-0.5 bg-danger"
+            className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-danger"
             style={{ top: `${nowFraction * 100}%` }}
           />
         )}
@@ -186,6 +206,12 @@ export function AgendaTimeGrid({
                     style={{ top: hour * HOUR_PX }}
                   />
                 ))}
+                {/* Día only: the free-slot layer sits under the event
+                    buttons (same z, earlier DOM) so pressing a block still
+                    opens its popover, while every free pixel drags. */}
+                {mode === "dia" && onCreateSlot && (
+                  <AgendaSlotLayer day={day} onCreateSlot={onCreateSlot} />
+                )}
                 {lanes.map((lane, laneIndex) => {
                   const width = 100 / lanes.length;
                   return lane.map((event) => {
@@ -224,6 +250,131 @@ export function AgendaTimeGrid({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------- free-slot layer -- */
+
+interface AgendaSlotLayerProps {
+  day: string;
+  onCreateSlot: (day: string, range?: SlotRange) => void;
+}
+
+/**
+ * The Día free-slot surface (S17 T5a): one focusable layer over the day's
+ * free space. Hover announces the snapped slot ("Libre de… · arrastrá para
+ * crear"), a drag paints the selection band and hands the 15-minute-
+ * snapped range to the panel, a plain click does the same for a single
+ * slot, and Enter/Space — a native button click with no pointer behind it
+ * (detail === 0) — opens the form with the day's default prefill: the
+ * keyboard fallback.
+ *
+ * The gesture stays on this element through `setPointerCapture`, so a
+ * drag crossing an event block never steals the range; a follow-up click
+ * after a pointer gesture is swallowed once by `handledPointerRef` so one
+ * gesture opens exactly one form. `touch-pan-y` keeps the page scrollable
+ * on touch (a tap still creates the tapped slot; vertical pans scroll).
+ */
+function AgendaSlotLayer({ day, onCreateSlot }: AgendaSlotLayerProps) {
+  const startYRef = useRef<number | null>(null);
+  const handledPointerRef = useRef(false);
+  const [hint, setHint] = useState<{ top: number; text: string } | null>(null);
+  const [selection, setSelection] = useState<{
+    top: number;
+    height: number;
+  } | null>(null);
+
+  /** Pointer Y clamped into the column, in px from its top. */
+  function columnY(element: HTMLElement, clientY: number): number {
+    const rect = element.getBoundingClientRect();
+    return Math.min(Math.max(clientY - rect.top, 0), rect.height);
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!event.isPrimary || event.button !== 0) return;
+    handledPointerRef.current = false;
+    startYRef.current = columnY(event.currentTarget, event.clientY);
+    setHint(null);
+    setSelection(null);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const element = event.currentTarget;
+    const y = columnY(element, event.clientY);
+    const startY = startYRef.current;
+    if (startY !== null) {
+      setSelection({ top: Math.min(startY, y), height: Math.abs(y - startY) });
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    if (!(rect.height > 0)) return; // unmounting: never render a NaN hint
+    setHint({
+      top: y,
+      text: formatSlotHint((y / rect.height) * MINUTES_PER_DAY),
+    });
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
+    const startY = startYRef.current;
+    if (startY === null) return;
+    startYRef.current = null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const endY = columnY(event.currentTarget, event.clientY);
+    setSelection(null);
+    setHint(null);
+    handledPointerRef.current = true;
+    onCreateSlot(day, slotRangeFromOffsets(startY, endY, rect.height));
+  }
+
+  function handlePointerCancel() {
+    startYRef.current = null;
+    setSelection(null);
+    setHint(null);
+  }
+
+  function handlePointerLeave() {
+    if (startYRef.current === null) setHint(null);
+  }
+
+  function handleClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (handledPointerRef.current) {
+      handledPointerRef.current = false;
+      return; // the pointer gesture above already opened the form
+    }
+    if (event.detail !== 0) return; // pointer presses never reach this path
+    onCreateSlot(day); // keyboard activation: the day's default prefill
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Horario libre: crear un evento"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onPointerLeave={handlePointerLeave}
+        onClick={handleClick}
+        className="absolute inset-0 z-0 cursor-crosshair touch-pan-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+      />
+      {selection && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 z-10 bg-accent/30"
+          style={{ top: `${selection.top}px`, height: `${selection.height}px` }}
+        />
+      )}
+      {hint && (
+        <span
+          className="pointer-events-none absolute left-1 z-10 -translate-y-1/2 rounded-sm bg-accent px-1.5 py-0.5 text-xs font-medium text-on-accent shadow-pop"
+          style={{ top: `${hint.top}px` }}
+        >
+          {hint.text}
+        </span>
+      )}
+    </>
   );
 }
 

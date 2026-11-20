@@ -19,11 +19,16 @@ import {
   type CalendarEvent,
   type EventCategory,
 } from "@/lib/data";
-import { updateEvent } from "@/lib/data/events";
+import { updateEvent, createEvent, removeEvent } from "@/lib/data/events";
 import { toArtIsoDate } from "@/lib/data/calendar";
 import { formatDate } from "@/lib/format";
 import { SOURCE_LABELS, formatTimeRange, sourceTone } from "./agenda-list";
-import { eventSourceAction, popoverMenuItems } from "./agenda-event-editor";
+import {
+  createInputFromForm,
+  eventFormValues,
+  eventSourceAction,
+  popoverMenuItems,
+} from "./agenda-event-editor";
 import { RowMenu } from "../expedientes/row-menu";
 
 /**
@@ -36,6 +41,11 @@ import { RowMenu } from "../expedientes/row-menu";
  * Evidence-driven shape:
  *  - read-only sources (audiencia/vencimiento/dia_inhabil) swap the edit row
  *    for their single "Ver …" action (eventSourceAction);
+ *  - manual rows carry the full edit family — Editar, Cambiar color (only
+ *    while the study HAS categories; T6 seeds them), Duplicar (a copy of
+ *    every field the user then edits) and Eliminar (behind the repo's
+ *    destructive-confirm dialog); read-only sources never offer Duplicar or
+ *    Eliminar, with the driver's manual-only guard as the backstop;
  *  - "Cambiar color" exists only while the study HAS categories (T6 seeds
  *    them) — an empty list hides the button, never inventing a palette; the
  *    picker maps a category onto the event because events carry no color
@@ -47,8 +57,9 @@ import { RowMenu } from "../expedientes/row-menu";
  *  - "Copiar enlace" copies THIS calendar view's URL: the recon documents
  *    no per-event permalink, so none is invented here.
  *
- * Nested surfaces own their own keys: the ⋯ menu and the color dialog each
- * see Escape first (target-based guards below), so one Esc peels one layer.
+ * Nested surfaces own their own keys: the ⋯ menu, the color dialog and the
+ * delete confirm each see Escape first (target-based guards below), so one
+ * Esc peels one layer.
  */
 
 interface AgendaEventPopoverProps {
@@ -105,6 +116,15 @@ export function AgendaEventPopover({
   });
   const [colorSaving, setColorSaving] = useState(false);
   const [colorError, setColorError] = useState<string | null>(null);
+  // --- Duplicar / Eliminar (T5a remainder) ------------------------------
+  const [duplicating, setDuplicating] = useState(false);
+  /** True while the delete confirm is open: it owns outside presses the
+   *  same way the color dialog does (ref = read inside the document
+   *  listener without resubscribing it). */
+  const deleteOpenRef = useRef(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     // Keyboard users land ON the first action.
@@ -143,6 +163,7 @@ export function AgendaEventPopover({
       const target = event.target as Node | null;
       if (!target) return;
       if (colorOpenRef.current) return; // the color dialog owns its clicks
+      if (deleteOpenRef.current) return; // the confirm owns its clicks
       if (panelRef.current?.contains(target)) return; // inside (incl. ⋯ menu)
       if (anchor.contains(target)) return; // the trigger toggles in the panel
       onClose();
@@ -231,6 +252,72 @@ export function AgendaEventPopover({
     }
   }
 
+  /** Duplicar: a copy of every field the user then edits (title, range,
+   *  location, notes, expediente, category). The driver always writes a
+   *  fresh manual row; a refusal toasts and the popover stays put. */
+  async function duplicateEvent() {
+    const input = createInputFromForm(eventFormValues(event));
+    if (!input) {
+      // Defensive: the form model already rejected an unparseable range.
+      toast("No pudimos duplicar el evento. Probá otra vez.", {
+        variant: "error",
+      });
+      return;
+    }
+    setDuplicating(true);
+    try {
+      await createEvent(input);
+      toast("Duplicamos el evento.");
+      onChanged();
+      onClose();
+    } catch (error) {
+      toast(
+        error instanceof DataLayerError
+          ? errorCopy(error.code)
+          : "No pudimos duplicar el evento. Probá otra vez.",
+        { variant: "error" },
+      );
+    } finally {
+      setDuplicating(false);
+    }
+  }
+
+  function openDeleteConfirm() {
+    deleteOpenRef.current = true;
+    setDeleteError(null);
+    setDeleteOpen(true);
+  }
+
+  function closeDeleteConfirm() {
+    deleteOpenRef.current = false;
+    setDeleteOpen(false);
+    setDeleting(false);
+    setDeleteError(null);
+  }
+
+  /** Eliminar: the confirm dialog pattern from expedientes/días inhábiles.
+   *  removeEvent's manual-only guard backs it; a refusal keeps the dialog
+   *  open so the typed error reads next to the confirm button. */
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await removeEvent(event.id);
+      closeDeleteConfirm();
+      toast("Eliminamos el evento.");
+      onChanged();
+      onClose();
+    } catch (error) {
+      setDeleteError(
+        error instanceof DataLayerError
+          ? errorCopy(error.code)
+          : "No pudimos eliminar el evento. Probá otra vez.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const sourceAction = eventSourceAction(event);
   const editable = event.source === "manual";
   const showColor = editable && categories.length > 0;
@@ -311,9 +398,11 @@ export function AgendaEventPopover({
           </p>
         )}
 
-        {/* Actions: editable rows offer the edit family (T5a ships Editar +
-            Cambiar color; Duplicar/Eliminar follow up), read-only rows swap
-            them for their single source action. */}
+        {/* Actions: manual rows carry the edit family — Editar, Cambiar
+            color (while the study has categories), Duplicar and Eliminar
+            (behind its confirm); read-only rows swap all of them for their
+            single source action, so derived events never offer a copy or a
+            delete the driver would refuse anyway. */}
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           {editable ? (
             <>
@@ -332,6 +421,22 @@ export function AgendaEventPopover({
                   Cambiar color
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={duplicateEvent}
+                loading={duplicating}
+              >
+                {duplicating ? "Duplicando…" : "Duplicar"}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={openDeleteConfirm}
+                disabled={duplicating}
+              >
+                Eliminar
+              </Button>
             </>
           ) : (
             sourceAction && (
@@ -401,6 +506,37 @@ export function AgendaEventPopover({
             </p>
           )}
         </div>
+      </Modal>
+
+      {/* Destructive confirm, same shape as expedientes and días inhábiles:
+          title + why-it-hurts description, Cancelar, danger confirm with a
+          busy label, and the refusal shown inline (the dialog stays open). */}
+      <Modal
+        open={deleteOpen}
+        onClose={closeDeleteConfirm}
+        title="Eliminar evento"
+        description={`¿Seguro que querés eliminar «${event.title || "este evento"}»? Esta acción no se puede deshacer.`}
+        busy={deleting}
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={closeDeleteConfirm}
+              disabled={deleting}
+            >
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={confirmDelete} loading={deleting}>
+              {deleting ? "Eliminando…" : "Eliminar"}
+            </Button>
+          </>
+        }
+      >
+        {deleteError && (
+          <p role="alert" className="text-sm font-medium text-danger">
+            {deleteError}
+          </p>
+        )}
       </Modal>
     </>
   );

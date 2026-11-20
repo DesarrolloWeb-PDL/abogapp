@@ -12,7 +12,10 @@ import {
  * S17 — the shared studio calendar: slice 1 (T2) covers the Lista view,
  * its verbatim empty/error copy and the 390 px shell; the T4 block adds
  * the four period views, ‹ ›/Hoy navigation, the D/S/M/A/L + H shortcuts,
- * the weekend/inhábil toggles and the "+N más" overflow. Fixtures seed
+ * the weekend/inhábil toggles and the "+N más" overflow. The T5a block
+ * covers create/edit/detail-popover, and this unit finishes it with
+ * Duplicar, Eliminar-with-confirm and the Día free-slot drag-create.
+ * Fixtures seed
  * through the same REST seam (demo token + `events_member` RLS), prefixed
  * `E2E agenda %` so a crashed run can pre-clean; cleanup runs in `finally`.
  * The audiencia row needs a real `hearings` parent because init.sql's
@@ -792,6 +795,15 @@ test.describe("S17 T5a — event create, edit and detail popover", () => {
       await expect(
         popover.getByRole("button", { name: "Cambiar color" }),
       ).toHaveCount(0);
+      // The copy/delete family is manual-only too: read-only sources never
+      // offer Duplicar/Eliminar (the driver's source guard is the backstop
+      // behind this UI gate).
+      await expect(
+        popover.getByRole("button", { name: "Duplicar", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        popover.getByRole("button", { name: "Eliminar", exact: true }),
+      ).toHaveCount(0);
 
       // ⋯ menu: Copiar enlace + Ver el expediente exist; Google Calendar and
       // the Assistant are absent (no credentials / no assistant surface).
@@ -851,6 +863,12 @@ test.describe("S17 T5a — event create, edit and detail popover", () => {
       });
 
       await page.goto("/agenda");
+      // Hydration roundtrip (L8 gotcha): the seeded row renders only after
+      // the panel's mount effects ran, so the keydown listener that owns
+      // the "d" shortcut is attached by the time the key is pressed.
+      await expect(
+        page.getByRole("button", { name: title, exact: true }),
+      ).toBeVisible();
       await expect(
         page.getByRole("button", { name: "Lista", exact: true }),
       ).toHaveAttribute("aria-pressed", "true");
@@ -865,6 +883,228 @@ test.describe("S17 T5a — event create, edit and detail popover", () => {
       await expect(
         page.getByRole("dialog", { name: `Detalle del evento: ${title}` }),
       ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
+  test("S17-12 Duplicar copies the manual event; Eliminar confirms, refuses and retries", async ({
+    page,
+  }) => {
+    const guard = guardPage(page, {
+      ignoreConsole: (text) => text.includes("Failed to load resource"),
+      ignoreResponse: (url) => url.includes("/rest/v1/events"),
+    });
+    const stamp = Date.now();
+    const title = `E2E agenda ${stamp} duplicar`;
+    const artToday = toArtDate(new Date().toISOString());
+    const scope = await agendaScope();
+
+    try {
+      await cleanSeededEvents();
+      await seedEvent(scope, {
+        title,
+        startAt: `${artToday}T14:00:00.000-03:00`,
+        location: "Secretaría 6",
+        notes: "Traer el escrito.",
+        caseId: SEED.gomezId,
+      });
+
+      await page.goto("/agenda");
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      const rows = page.getByRole("button", { name: title, exact: true });
+      await expect(rows).toHaveCount(1);
+
+      // Duplicar: offered on manual rows, and the copy carries every field
+      // the user then edits (title/time/location/notes/expediente).
+      await rows.click();
+      const popover = page.getByRole("dialog", {
+        name: `Detalle del evento: ${title}`,
+      });
+      // exact: true — the ⋯ trigger's label embeds the title, and substring
+      // matching would let "duplicar" hit both it and the real button.
+      await expect(
+        popover.getByRole("button", { name: "Duplicar", exact: true }),
+      ).toBeVisible();
+      await expect(
+        popover.getByRole("button", { name: "Eliminar", exact: true }),
+      ).toBeVisible();
+      await expectNoAxeViolations(page, "/agenda duplicate/delete actions (T5a)");
+      await popover
+        .getByRole("button", { name: "Duplicar", exact: true })
+        .click();
+      await expect(page.getByText("Duplicamos el evento.")).toBeVisible();
+      await expect(rows).toHaveCount(2);
+
+      const copies = await restGet<
+        { location: string; notes: string; case_id: string | null; start_at: string }[]
+      >(
+        `events?title=eq.${encodeURIComponent(title)}` +
+          "&select=location,notes,case_id,start_at",
+      );
+      expect(copies).toHaveLength(2);
+      for (const copy of copies) {
+        expect(copy.location).toBe("Secretaría 6");
+        expect(copy.notes).toBe("Traer el escrito.");
+        expect(copy.case_id).toBe(SEED.gomezId);
+        expect(Date.parse(copy.start_at)).toBe(
+          Date.parse(`${artToday}T14:00:00.000-03:00`),
+        );
+      }
+
+      // Eliminar: the confirm modal asks first; Cancelar keeps both rows.
+      await rows.first().click();
+      const confirm = page.getByRole("dialog", { name: "Eliminar evento" });
+      await popover.getByRole("button", { name: "Eliminar", exact: true }).click();
+      await expect(confirm).toBeVisible();
+      await expect(confirm).toContainText(
+        `¿Seguro que querés eliminar «${title}»?`,
+      );
+      await expect(confirm).toContainText("Esta acción no se puede deshacer.");
+      await expectNoAxeViolations(page, "/agenda delete confirm (T5a)");
+      await confirm.getByRole("button", { name: "Cancelar" }).click();
+      await expect(confirm).toHaveCount(0);
+      await expect(rows).toHaveCount(2);
+
+      // A refused delete keeps the dialog open so the user can retry.
+      const eventsPattern = "**/rest/v1/events*";
+      await page.route(eventsPattern, (route) =>
+        route.request().method() === "DELETE"
+          ? route.fulfill({
+              status: 500,
+              contentType: "application/json",
+              body: JSON.stringify({ message: "forced refusal for S17 T5a" }),
+            })
+          : route.continue(),
+      );
+      await popover
+        .getByRole("button", { name: "Eliminar", exact: true })
+        .click();
+      await expect(confirm).toBeVisible();
+      await confirm.getByRole("button", { name: "Eliminar", exact: true }).click();
+      await expect(
+        page.getByText(
+          "No pudimos completar la operación. Probá otra vez en unos minutos.",
+        ),
+      ).toBeVisible();
+      await expect(confirm).toBeVisible();
+      await expect(rows).toHaveCount(2);
+
+      await page.unroute(eventsPattern);
+      await confirm.getByRole("button", { name: "Eliminar", exact: true }).click();
+      await expect(page.getByText("Eliminamos el evento.")).toBeVisible();
+      await expect(confirm).toHaveCount(0);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(rows).toHaveCount(1);
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
+  test("S17-13 Día free slot: hover hint, drag creates the range, Enter falls back", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const scope = await agendaScope();
+    const artToday = toArtDate(new Date().toISOString());
+
+    try {
+      await cleanSeededEvents();
+      // One row so the Día grid renders at all (an empty period shows the
+      // empty state instead of the grid).
+      const title = `E2E agenda ${Date.now()} slot`;
+      await seedEvent(scope, {
+        title,
+        startAt: `${artToday}T14:00:00.000-03:00`,
+      });
+
+      await page.goto("/agenda");
+      // Hydration roundtrip (L8 gotcha): the row renders only after the
+      // panel's mount effects ran, so the "d" shortcut listener is live.
+      await expect(
+        page.getByRole("button", { name: title, exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await page.keyboard.press("d");
+      await expect(
+        page.getByRole("button", { name: "Día", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText("23:00")).toBeVisible(); // the hour gutter
+
+      const layer = page.getByRole("button", {
+        name: "Horario libre: crear un evento",
+      });
+      await expect(layer).toBeVisible();
+      // The view switch kicks off a refetch whose transient refresh bar
+      // (2px + gap-4) sits directly above the grid: when it disappears the
+      // column shifts up ~18 px, so the gesture coordinates are measured
+      // only after the refresh settles — otherwise the same press lands
+      // one slot (15 min) off.
+      await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+      await expectNoAxeViolations(page, "/agenda Día free slot (T5a)");
+      await layer.evaluate((element) =>
+        element.scrollIntoView({ block: "center" }),
+      );
+      const box = await layer.boundingBox();
+      expect(box, "the Día column has a box").not.toBeNull();
+      const column = box as NonNullable<typeof box>;
+      // Two free points at fixed minutes of the 24-hour column (the drag
+      // math snaps to 15 minutes; these sit well inside their slots).
+      const minutesToY = (minutes: number) =>
+        column.y + (column.height * minutes) / 1440;
+      const x = column.x + column.width / 2;
+      const yStart = minutesToY(9 * 60 + 30); // 09:30
+      const yEnd = minutesToY(13 * 60 + 15); // 13:15
+      const viewport = page.viewportSize();
+      expect(viewport).not.toBeNull();
+      expect(yStart, "start point inside the viewport").toBeGreaterThan(0);
+      expect(yEnd, "end point inside the viewport").toBeLessThan(
+        (viewport as NonNullable<typeof viewport>).height,
+      );
+
+      // Hover announces the snapped slot in the recon's wording.
+      await page.mouse.move(x, yStart);
+      await expect(
+        page.getByText("Libre de 09:30 · arrastrá para crear"),
+      ).toBeVisible();
+
+      // Drag 09:30 → 13:15: the create form arrives with THAT range.
+      await page.mouse.down();
+      await page.mouse.move(x, yEnd, { steps: 6 });
+      await page.mouse.up();
+      const dialog = page.getByRole("dialog", { name: "Nuevo evento" });
+      await expect(dialog).toBeVisible();
+      await expect(page.getByLabel("Inicio", { exact: true })).toHaveValue(
+        `${artToday}T09:30`,
+      );
+      await expect(page.getByLabel("Fin", { exact: true })).toHaveValue(
+        `${artToday}T13:15`,
+      );
+      await expect(page.getByLabel("Título", { exact: true })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+
+      // Keyboard fallback: Enter on the focused free slot opens the same
+      // form with the day's default prefill — never an empty range.
+      await layer.focus();
+      await page.keyboard.press("Enter");
+      await expect(dialog).toBeVisible();
+      await expect(page.getByLabel("Inicio", { exact: true })).toHaveValue(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
+      );
+      await expect(page.getByLabel("Fin", { exact: true })).toHaveValue(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
+      );
       await page.keyboard.press("Escape");
       await expect(page.getByRole("dialog")).toHaveCount(0);
 

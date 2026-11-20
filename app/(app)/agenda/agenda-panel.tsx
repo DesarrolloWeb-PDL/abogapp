@@ -48,7 +48,9 @@ import {
 } from "./agenda-periods";
 import {
   defaultEventFormValues,
+  slotFormValues,
   type EventFormValues,
+  type SlotRange,
 } from "./agenda-event-editor";
 import { AgendaEventForm } from "./agenda-event-form";
 import { AgendaEventPopover } from "./agenda-event-popover";
@@ -132,9 +134,10 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
     () => new Set(nonWorkingDays),
   );
   // --- T5a: event popover + create/edit form -----------------------------
-  // Popover = {event, trigger element}; editor = create (prefilled values)
-  // or edit (the row itself). Both live here so `/agenda` and the case tab
-  // share one copy of every handler (the AgendaPanel discipline).
+  // Popover = {event, trigger element}; editor = create (prefilled values:
+  // `C`/top-bar → the day default, a Día free slot → its range) or edit
+  // (the row itself). Both live here so `/agenda` and the case tab share
+  // one copy of every handler (the AgendaPanel discipline).
   const [popover, setPopover] = useState<{
     event: CalendarEvent;
     anchor: HTMLElement;
@@ -162,6 +165,20 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
         day: anchor,
         caseId: caseId ?? "",
       }),
+    });
+  }
+
+  /** Día free-slot (drag/click on the grid's layer): prefill from the
+   *  snapped range; the keyboard fallback arrives without a range and
+   *  takes the day default, exactly like `C`. */
+  function openCreateSlot(day: string, range?: SlotRange) {
+    setPopover(null);
+    const slot = range
+      ? slotFormValues(day, range.start, range.end, caseId ?? "")
+      : null;
+    setEditor({
+      mode: "create",
+      values: slot ?? defaultEventFormValues({ day, caseId: caseId ?? "" }),
     });
   }
 
@@ -590,6 +607,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
               toggles={dayToggles}
               nonWorkingDays={inhabilDays}
               onSelectEvent={openPopover}
+              onCreateSlot={openCreateSlot}
             />
           )}
 
