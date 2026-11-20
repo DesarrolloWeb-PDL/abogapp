@@ -27,6 +27,9 @@ interface RecordedCall {
 
 interface MockQuery extends PromiseLike<QueryResponse> {
   select: (...args: unknown[]) => MockQuery;
+  insert: (...args: unknown[]) => MockQuery;
+  update: (...args: unknown[]) => MockQuery;
+  delete: (...args: unknown[]) => MockQuery;
   eq: (...args: unknown[]) => MockQuery;
   gt: (...args: unknown[]) => MockQuery;
   lt: (...args: unknown[]) => MockQuery;
@@ -55,16 +58,19 @@ import {
   UPCOMING_DAYS,
   applyEventFilters,
   compareEventsByStart,
+  createEvent,
   isEventSource,
   listEventCategories,
   listEvents,
   listEventsByCase,
   listUpcomingEvents,
+  removeEvent,
   resetFakeEventCategories,
   resetFakeEvents,
   seedFakeEventCategories,
   seedFakeEvents,
   upcomingEventWindow,
+  updateEvent,
   type CalendarEvent,
 } from "./events";
 import { getSession, signUp } from "./auth";
@@ -102,6 +108,9 @@ function buildQuery(call: RecordedCall): MockQuery {
     };
   const query: MockQuery = {
     select: step("select"),
+    insert: step("insert"),
+    update: step("update"),
+    delete: step("delete"),
     eq: step("eq"),
     gt: step("gt"),
     lt: step("lt"),
@@ -860,5 +869,323 @@ describe("supabase driver", () => {
   it("listEventsByCase pushes an empty caseId guard before any query", async () => {
     expect(await listEventsByCase("")).toEqual([]);
     expect(calls).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------- T5a: event CRUD mutations ---- */
+
+describe("event mutations (T5a)", () => {
+  /** One manual `events` row as PostgREST serializes it (embeds included). */
+  const MANUAL_ROW = {
+    id: "event-9",
+    study_id: "study-9",
+    case_id: "case-a",
+    category_id: "cat-1",
+    title: "Audiencia de conciliación",
+    start_at: "2026-11-20T14:00:00+00:00",
+    end_at: "2026-11-20T15:00:00+00:00",
+    location: "Secretaría 4",
+    notes: "Comparición personal",
+    source: "manual",
+    created_at: "2026-11-18T10:00:00.000Z",
+    category: { id: "cat-1", name: "Audiencias", color: "#ef4444", position: 1 },
+    case: { caratula: "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos" },
+  };
+
+  it("createEvent writes a study-scoped manual row and serves it back", async () => {
+    await startStudy();
+    const kase = await createCase({ caratula: "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos" });
+
+    const created = await createEvent({
+      title: "  Audiencia de conciliación  ",
+      startAt: "2026-11-25T14:00:00.000Z",
+      endAt: "2026-11-25T15:00:00.000Z",
+      caseId: kase.id,
+      location: "Secretaría 4",
+      notes: "Comparición personal",
+    });
+
+    // Trimmed title, always-manual source (the form never creates derived
+    // rows), and the read-time joins resolved (caratula from the store).
+    expect(created).toMatchObject({
+      title: "Audiencia de conciliación",
+      source: "manual",
+      caseId: kase.id,
+      caseCaratula: kase.caratula,
+      location: "Secretaría 4",
+      notes: "Comparición personal",
+    });
+    const rows = await listEvents();
+    expect(rows.map((row) => row.id)).toEqual([created.id]);
+  });
+
+  it("createEvent refuses broken input before writing anything", async () => {
+    await expect(
+      createEvent({ title: "X", startAt: "2026-11-25T14:00:00Z", endAt: "2026-11-25T15:00:00Z" }),
+    ).rejects.toMatchObject({ code: "no_study" });
+
+    await startStudy();
+    const startAt = "2026-11-25T14:00:00.000Z";
+    const endAt = "2026-11-25T15:00:00.000Z";
+
+    await expect(
+      createEvent({ title: "   ", startAt, endAt }),
+    ).rejects.toMatchObject({ code: "missing_fields" });
+    await expect(
+      createEvent({ title: "x".repeat(EVENT_TITLE_MAX + 1), startAt, endAt }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+    await expect(
+      createEvent({ title: "Al revés", startAt: endAt, endAt: startAt }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+    await expect(
+      createEvent({ title: "Iparseable", startAt: "ayer", endAt }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+    await expect(
+      createEvent({ title: "Caso fantasma", startAt, endAt, caseId: "case-unknown" }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+    await expect(
+      createEvent({ title: "Categoría fantasma", startAt, endAt, categoryId: "cat-unknown" }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+
+    expect(await listEvents()).toEqual([]);
+  });
+
+  it("updateEvent patches a manual row and returns the mapped result", async () => {
+    await startStudy();
+    const kase = await createCase({ caratula: "Pérez, Juan c/ Constructora del Sur SRL s/ despido" });
+    const [created] = await seedFakeEvents([
+      {
+        title: "Reunión previa",
+        startAt: "2026-11-25T14:00:00.000Z",
+        endAt: "2026-11-25T15:00:00.000Z",
+        caseId: kase.id,
+      },
+    ]);
+
+    const updated = await updateEvent(created.id, {
+      title: "Reunión previa reprogramada",
+      endAt: "2026-11-25T16:30:00.000Z",
+      location: "Oficina 2",
+      caseId: null,
+    });
+
+    expect(updated).toMatchObject({
+      id: created.id,
+      title: "Reunión previa reprogramada",
+      endAt: "2026-11-25T16:30:00.000Z",
+      location: "Oficina 2",
+      caseId: null,
+      caseCaratula: "",
+      startAt: created.startAt, // untouched fields survive the patch
+    });
+    const rows = await listEvents();
+    expect(rows[0]).toMatchObject({ title: "Reunión previa reprogramada" });
+  });
+
+  it("updateEvent refuses empty patches, foreign rows and non-manual sources", async () => {
+    await startStudy();
+    const [manual] = await seedFakeEvents([
+      { title: "Manual", startAt: "2026-11-25T14:00:00.000Z", endAt: "2026-11-25T15:00:00.000Z" },
+    ]);
+    const [derived] = await seedFakeEvents([
+      {
+        title: "Del sistema",
+        startAt: "2026-11-26T14:00:00.000Z",
+        endAt: "2026-11-26T15:00:00.000Z",
+        source: "vencimiento",
+      },
+    ]);
+
+    // A PATCH with nothing to change is a client bug: no write, typed code.
+    await expect(updateEvent(manual.id, {})).rejects.toMatchObject({
+      code: "missing_fields",
+    });
+    // Unknown/foreign id and a derived (read-only) source share one refusal.
+    await expect(
+      updateEvent("event-unknown", { title: "Nuevo" }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+    await expect(
+      updateEvent(derived.id, { title: "Nuevo" }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+
+    // Validation failures leave the row untouched.
+    await expect(
+      updateEvent(manual.id, { title: "  " }),
+    ).rejects.toMatchObject({ code: "missing_fields" });
+    await expect(
+      updateEvent(manual.id, { startAt: "2026-11-26T10:00:00.000Z" }),
+    ).rejects.toMatchObject({ code: "save_failed" }); // end before the new start
+    await expect(
+      updateEvent(manual.id, { caseId: "case-unknown" }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+
+    const rows = await listEvents();
+    expect(rows.map((row) => row.title).sort()).toEqual(["Del sistema", "Manual"]);
+  });
+
+  it("createEvent inserts a manual row pinned to the study (supabase)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://demo.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "anon-demo");
+    queueMembership();
+    queueResponse("events", { data: [MANUAL_ROW], error: null });
+
+    const created = await createEvent({
+      title: "Audiencia de conciliación",
+      startAt: "2026-11-20T14:00:00+00:00",
+      endAt: "2026-11-20T15:00:00+00:00",
+      caseId: "case-a",
+      categoryId: "cat-1",
+    });
+
+    expect(created).toMatchObject({
+      id: "event-9",
+      title: "Audiencia de conciliación",
+      source: "manual",
+      caseCaratula: "Gómez, Rosa c/ Empresa de Luz S.A. s/ cobro de pesos",
+    });
+
+    const write = calls.find(
+      (call) => call.table === "events" && call.steps.some((step) => step.name === "insert"),
+    );
+    expect(write?.steps[0]).toEqual({
+      name: "insert",
+      args: [
+        {
+          study_id: "study-9",
+          title: "Audiencia de conciliación",
+          start_at: "2026-11-20T14:00:00+00:00",
+          end_at: "2026-11-20T15:00:00+00:00",
+          case_id: "case-a",
+          category_id: "cat-1",
+          location: "",
+          notes: "",
+          source: "manual",
+        },
+      ],
+    });
+    // The insert selects the same embeds the reads map (one mapper).
+    expect(write?.steps.some((step) => step.name === "select")).toBe(true);
+    expect(write?.steps.some((step) => step.name === "single")).toBe(true);
+  });
+
+  it("createEvent validates before the insert (supabase)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://demo.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "anon-demo");
+    // One membership read per createEvent attempt (requireStudy runs before
+    // validation in both branches — no_study outranks missing_fields).
+    queueMembership();
+    queueMembership();
+
+    await expect(
+      createEvent({ title: "   ", startAt: "2026-11-20T14:00:00Z", endAt: "2026-11-20T15:00:00Z" }),
+    ).rejects.toMatchObject({ code: "missing_fields" });
+    await expect(
+      createEvent({
+        title: "Al revés",
+        startAt: "2026-11-20T15:00:00Z",
+        endAt: "2026-11-20T14:00:00Z",
+      }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+
+    expect(
+      calls.some((call) => call.steps.some((step) => step.name === "insert")),
+    ).toBe(false);
+  });
+
+  it("updateEvent pre-reads the row, validates merged values and sends only provided columns (supabase)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://demo.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "anon-demo");
+    queueMembership();
+    // Pre-read answers the current MANUAL row…
+    queueResponse("events", { data: [MANUAL_ROW], error: null });
+    // …then the UPDATE itself answers the mapped result.
+    queueResponse("events", {
+      data: [{ ...MANUAL_ROW, title: "Reunión reprogramada" }],
+      error: null,
+    });
+
+    const updated = await updateEvent("event-9", { title: "Reunión reprogramada" });
+    expect(updated.title).toBe("Reunión reprogramada");
+
+    const updateWrite = calls.find(
+      (call) => call.table === "events" && call.steps.some((step) => step.name === "update"),
+    );
+    expect(updateWrite?.steps[0]).toEqual({
+      name: "update",
+      args: [{ title: "Reunión reprogramada" }],
+    });
+    expect(updateWrite?.steps).toContainEqual({ name: "eq", args: ["id", "event-9"] });
+    expect(updateWrite?.steps).toContainEqual({ name: "eq", args: ["study_id", "study-9"] });
+
+    // The pre-read asks only for what validation needs (merged range +
+    // the manual-source guard), not the full embed row.
+    const read = calls.filter((call) => call.table === "events")[0];
+    expect(read?.steps[0]?.args[0]).toContain("start_at");
+    expect(read?.steps[0]?.args[0]).toContain("source");
+  });
+
+  it("a read-only source row never reaches an UPDATE (supabase)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://demo.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "anon-demo");
+    queueMembership();
+    // Pre-read answers a derived row (source = vencimiento): the write must
+    // be refused before any UPDATE step is recorded.
+    queueResponse("events", { data: [{ ...MANUAL_ROW, source: "vencimiento" }], error: null });
+
+    await expect(
+      updateEvent("event-9", { title: "Nuevo" }),
+    ).rejects.toMatchObject({ code: "save_failed" });
+
+    expect(
+      calls.some((call) => call.steps.some((step) => step.name === "update")),
+    ).toBe(false);
+  });
+
+  it("removeEvent deletes a manual study row and refuses the rest", async () => {
+    await startStudy();
+    const [manual] = await seedFakeEvents([
+      { title: "Borrable", startAt: "2026-11-25T14:00:00.000Z", endAt: "2026-11-25T15:00:00.000Z" },
+    ]);
+    const [derived] = await seedFakeEvents([
+      {
+        title: "Del sistema",
+        startAt: "2026-11-26T14:00:00.000Z",
+        endAt: "2026-11-26T15:00:00.000Z",
+        source: "dia_inhabil",
+      },
+    ]);
+
+    await expect(removeEvent("event-unknown")).rejects.toMatchObject({
+      code: "save_failed",
+    });
+    await expect(removeEvent(derived.id)).rejects.toMatchObject({
+      code: "save_failed",
+    });
+    expect(await listEvents()).toHaveLength(2);
+
+    await removeEvent(manual.id);
+    const rows = await listEvents();
+    expect(rows.map((row) => row.id)).toEqual([derived.id]);
+  });
+
+  it("removeEvent pins the study and the manual source on the wire (supabase)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://demo.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "anon-demo");
+    queueMembership();
+    queueResponse("events", { data: [{ id: "event-9" }], error: null });
+
+    await removeEvent("event-9");
+
+    const write = calls.find(
+      (call) => call.table === "events" && call.steps.some((step) => step.name === "delete"),
+    );
+    expect(write?.steps).toContainEqual({ name: "eq", args: ["id", "event-9"] });
+    expect(write?.steps).toContainEqual({ name: "eq", args: ["study_id", "study-9"] });
+    expect(write?.steps).toContainEqual({ name: "eq", args: ["source", "manual"] });
+
+    // Zero rows deleted (foreign/derived/unknown id) → typed refusal.
+    queueMembership();
+    queueResponse("events", { data: [], error: null });
+    await expect(removeEvent("event-9")).rejects.toMatchObject({ code: "save_failed" });
   });
 });

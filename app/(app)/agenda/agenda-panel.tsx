@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import {
   UPCOMING_DAYS,
   listEventCategories,
@@ -15,6 +16,7 @@ import {
   listUpcomingEvents,
   loadNonWorkingDays,
   nonWorkingDays,
+  type CalendarEvent,
   type EventCategory,
 } from "@/lib/data";
 import { toArtIsoDate } from "@/lib/data/calendar";
@@ -44,6 +46,12 @@ import {
   type AgendaDayToggles,
   type AgendaViewKind,
 } from "./agenda-periods";
+import {
+  defaultEventFormValues,
+  type EventFormValues,
+} from "./agenda-event-editor";
+import { AgendaEventForm } from "./agenda-event-form";
+import { AgendaEventPopover } from "./agenda-event-popover";
 import { AgendaTimeGrid, AgendaMonthGrid, AgendaYearGrid } from "./agenda-grids";
 import { AgendaTopBar, useAgendaNarrowViewport } from "./agenda-top-bar";
 
@@ -123,6 +131,56 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
   const [inhabilDays, setInhabilDays] = useState<ReadonlySet<string>>(
     () => new Set(nonWorkingDays),
   );
+  // --- T5a: event popover + create/edit form -----------------------------
+  // Popover = {event, trigger element}; editor = create (prefilled values)
+  // or edit (the row itself). Both live here so `/agenda` and the case tab
+  // share one copy of every handler (the AgendaPanel discipline).
+  const [popover, setPopover] = useState<{
+    event: CalendarEvent;
+    anchor: HTMLElement;
+  } | null>(null);
+  const [editor, setEditor] = useState<
+    | { mode: "create"; values: EventFormValues }
+    | { mode: "edit"; event: CalendarEvent }
+    | null
+  >(null);
+  const { toast } = useToast();
+
+  /** Stable identity: the popover subscribes its document listeners once. */
+  const closePopover = useCallback(() => setPopover(null), []);
+
+  function openPopover(event: CalendarEvent, anchor: HTMLElement) {
+    setPopover({ event, anchor });
+  }
+
+  /** Create prefilled with the anchor day (recon `C` + top-bar button). */
+  function openCreate() {
+    setPopover(null);
+    setEditor({
+      mode: "create",
+      values: defaultEventFormValues({
+        day: anchor,
+        caseId: caseId ?? "",
+      }),
+    });
+  }
+
+  function openEdit(event: CalendarEvent) {
+    setPopover(null);
+    setEditor({ mode: "edit", event });
+  }
+
+  /** After any save: close the form, toast, refetch with current criteria. */
+  function handleSaved(mode: "create" | "edit") {
+    setEditor(null);
+    toast(
+      mode === "create"
+        ? "Creaste el evento."
+        : "Actualizamos el evento.",
+    );
+    fetchEvents({ search: debouncedSearch, sources, categoryIds });
+  }
+
   const dayToggles: AgendaDayToggles = {
     weekends: showWeekends,
     nonWorkingDays: showNonWorkingDays,
@@ -137,7 +195,12 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
       // before any network answer can land, so a ready list always flips to
       // `refreshing` before its rows are swapped.
       Promise.resolve().then(() => {
-        if (requestId === requestRef.current) dispatch({ type: "load" });
+        if (requestId === requestRef.current) {
+          dispatch({ type: "load" });
+          // A refetch invalidates any open detail popover: its trigger may
+          // unmount (view/anchor/filters changed) and its row may be stale.
+          setPopover(null);
+        }
       });
       const criteria = toEventListFilter(snapshot);
       // Lista keeps the driver's upcoming window; the period views read
@@ -188,14 +251,21 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
     fetchNonWorkingDays();
   }, [fetchCategories, fetchNonWorkingDays]);
 
-  // D/S/M/A/L + H (recon shortcuts): quiet while a modifier is held or the
-  // user is typing (the search box keeps every letter), and a narrow
-  // screen refuses the views it does not offer.
+  // D/S/M/A/L + H (recon shortcuts) + C = Nuevo evento (T5a). Quiet while a
+  // modifier is held or the user is typing (the search box keeps every
+  // letter), while the create/edit form owns the screen (its buttons are
+  // legitimate key targets too), and a narrow screen refuses unavailable
+  // views. The handler re-subscribes when the guard inputs change.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (editor) return;
       const action = agendaShortcutAction(event, document.activeElement, narrow);
       if (!action) return;
       event.preventDefault();
+      if (action.type === "create") {
+        openCreate();
+        return;
+      }
       if (action.type === "today") {
         setAnchor(toArtIsoDate(new Date()));
         return;
@@ -204,7 +274,8 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [narrow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- openCreate reads anchor from this render's closure; re-subscribing on editor/anchor keeps the guard and prefill fresh.
+  }, [narrow, editor, anchor]);
 
   const { sources, categoryIds } = filters;
   useEffect(() => {
@@ -283,6 +354,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
         onToday={() => setAnchor(toArtIsoDate(new Date()))}
         onToggleWeekends={setShowWeekends}
         onToggleNonWorkingDays={setShowNonWorkingDays}
+        onNewEvent={openCreate}
       />
 
       <div className="flex flex-wrap items-end gap-3">
@@ -481,9 +553,15 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-base font-semibold text-text">
+                      <button
+                        type="button"
+                        onClick={(clickEvent) =>
+                          openPopover(event, clickEvent.currentTarget)
+                        }
+                        className="cursor-pointer rounded-sm text-left text-base font-semibold text-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      >
                         {event.title}
-                      </p>
+                      </button>
                       {event.location && (
                         <p className="text-base text-text-muted">
                           {event.location}
@@ -511,6 +589,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
               today={today}
               toggles={dayToggles}
               nonWorkingDays={inhabilDays}
+              onSelectEvent={openPopover}
             />
           )}
 
@@ -522,6 +601,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
               toggles={dayToggles}
               nonWorkingDays={inhabilDays}
               onOpenDay={openDay}
+              onSelectEvent={openPopover}
             />
           )}
 
@@ -535,6 +615,31 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
             />
           )}
         </div>
+      )}
+
+      {/* T5a overlays: the detail popover (anchored to its trigger) and the
+          create/edit form; one copy of each serves /agenda and the case tab. */}
+      {popover && (
+        <AgendaEventPopover
+          event={popover.event}
+          anchor={popover.anchor}
+          categories={categories}
+          onClose={closePopover}
+          onEdit={openEdit}
+          onChanged={() =>
+            fetchEvents({ search: debouncedSearch, sources, categoryIds })
+          }
+        />
+      )}
+
+      {editor && (
+        <AgendaEventForm
+          key={editor.mode === "edit" ? editor.event.id : "create"}
+          event={editor.mode === "edit" ? editor.event : undefined}
+          initialValues={editor.mode === "create" ? editor.values : undefined}
+          onClose={() => setEditor(null)}
+          onSaved={handleSaved}
+        />
       )}
     </div>
   );

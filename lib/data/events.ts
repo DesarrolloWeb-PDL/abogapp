@@ -37,8 +37,11 @@
  * names and eleven colors are NOT in the recon, so nothing in this module
  * invents them — `listEventCategories` answers whatever the study has (empty
  * until the T6 admin seeds them), and the fake layer starts empty too.
- * Event writes belong to T5; search runs through lib/search.ts (accent/typo
- * tolerant, the BUG-003 discipline) over title/location/notes/caratula.
+ * Event writes (T5a) are createEvent/updateEvent/removeEvent below: manual
+ * rows only — derived sources (audiencia/vencimiento/dia_inhabil) are
+ * read-only in the popover AND refused by both driver branches. Search runs
+ * through lib/search.ts (accent/typo tolerant, the BUG-003 discipline) over
+ * title/location/notes/caratula.
  *
  * Shared bounds/vocabulary are duplicated per driver on purpose (the
  * tasks/movements/pruebas pairs do the same): a value import from
@@ -53,8 +56,11 @@ import { getDataDriver } from "./driver";
 import { getStore, isoNow } from "./store";
 import { getMyStudy, requireStudy } from "./studies";
 import {
+  createEventSupabase,
   listEventCategoriesSupabase,
   listEventsSupabase,
+  removeEventSupabase,
+  updateEventSupabase,
 } from "@/lib/supabase/events";
 
 /** Recon S17 Lista label: "Próximos 30 días" — the default upcoming horizon. */
@@ -77,6 +83,37 @@ const DEFAULT_CATEGORY_COLOR = "#64748b";
 
 /** `event_categories.position` default (init.sql). */
 const DEFAULT_CATEGORY_POSITION = 0;
+
+/* ---------------------------------------------------------- validation --- */
+
+/**
+ * Trim + bound check for `events.title` (mirrors the init.sql
+ * `char_length between 1 and 300` check): blank after trim → missing_fields
+ * (the screen shows the field error), over the bound → save_failed (the
+ * constraint code). Both drivers run THIS shape of validation before any
+ * write — supabase/events.ts keeps its own copy, the tasks-pair convention
+ * (a value import from a screen-facing module back into a driver branch
+ * would close a runtime import cycle; see the header note).
+ */
+function validateEventTitle(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) throw new DataLayerError("missing_fields");
+  if (trimmed.length > EVENT_TITLE_MAX) throw new DataLayerError("save_failed");
+  return trimmed;
+}
+
+/**
+ * `chk_event_range` over parseable instants: end strictly after start.
+ * An unparseable instant fails the same way (BUG-004 discipline: never
+ * trusted, never thrown to the screen — a typed code instead).
+ */
+function validateEventRange(startAt: string, endAt: string): void {
+  const start = Date.parse(startAt);
+  const end = Date.parse(endAt);
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+    throw new DataLayerError("save_failed");
+  }
+}
 
 /** One row of the study's `event_categories` (S17 category checkbox source). */
 export interface EventCategory {
@@ -133,6 +170,44 @@ export interface EventListFilter {
 export interface UpcomingEventsFilter extends EventListFilter {
   /** Horizon filling a missing `to` (default UPCOMING_DAYS; unusable values clamp). */
   days?: number;
+}
+
+/** createEvent input: content only — the source is always `manual` (the
+ *  form never creates derived rows; sync owns those, see EVENT_SOURCES). */
+export interface CreateEventInput {
+  title: string;
+  startAt: string;
+  endAt: string;
+  caseId?: string | null;
+  categoryId?: string | null;
+  location?: string;
+  notes?: string;
+}
+
+/** updateEvent patch: any subset of the writable columns; `null` clears
+ *  the case/category link. `source` is deliberately absent — derived rows
+ *  are read-only in the popover and refused by the driver. */
+export interface UpdateEventPatch {
+  title?: string;
+  startAt?: string;
+  endAt?: string;
+  caseId?: string | null;
+  categoryId?: string | null;
+  location?: string;
+  notes?: string;
+}
+
+/** True when the patch would change nothing (client bug → missing_fields). */
+function isEmptyEventPatch(patch: UpdateEventPatch): boolean {
+  return (
+    patch.title === undefined &&
+    patch.startAt === undefined &&
+    patch.endAt === undefined &&
+    patch.caseId === undefined &&
+    patch.categoryId === undefined &&
+    patch.location === undefined &&
+    patch.notes === undefined
+  );
 }
 
 export interface UpcomingWindowOptions {
@@ -534,6 +609,130 @@ export async function listEventCategories(): Promise<EventCategory[]> {
       color: row.color,
       position: row.position,
     }));
+}
+
+/**
+ * Create a manual event (T5a: the "Nuevo evento" form and Duplicar).
+ * Validation runs BEFORE any write in both branches (tasks discipline):
+ * trimmed title inside the check bound, a sane `end > start` range, and the
+ * two FKs — case study-scoped, category existing. The supabase branch
+ * mirrors this order itself (its copy lives in lib/supabase/events.ts).
+ */
+export async function createEvent(input: CreateEventInput): Promise<CalendarEvent> {
+  if (getDataDriver() === "supabase") return createEventSupabase(input);
+
+  const study = await requireStudy();
+  const title = validateEventTitle(input.title);
+  validateEventRange(input.startAt, input.endAt);
+
+  const caseId = input.caseId ?? null;
+  if (
+    caseId !== null &&
+    !getStore().cases.some(
+      (row) => row.id === caseId && row.studyId === study.id,
+    )
+  ) {
+    throw new DataLayerError("save_failed"); // mirrors fk_events_case
+  }
+  const categoryId = input.categoryId ?? null;
+  if (categoryId !== null && !fakeCategoryRows.some((row) => row.id === categoryId)) {
+    throw new DataLayerError("save_failed"); // mirrors the category FK
+  }
+
+  const stored: FakeEventRow = {
+    id: `event-${(fakeEventSeq += 1)}`,
+    studyId: study.id,
+    caseId,
+    categoryId,
+    title,
+    startAt: input.startAt,
+    endAt: input.endAt,
+    location: input.location ?? "",
+    notes: input.notes ?? "",
+    source: "manual", // the form never creates derived rows
+    createdAt: isoNow(),
+  };
+  fakeEventRows.push(stored);
+  return mapFakeEvent(stored);
+}
+
+/**
+ * Patch a MANUAL event (T5a "Editar" / "Cambiar color"). Derived rows
+ * (audiencia/vencimiento/dia_inhabil) are read-only at the driver level,
+ * not just in the popover: a stale screen can never desync them from their
+ * origin rows. The whole merged result validates before anything is written
+ * (bulkArchive discipline) — the supabase branch pre-reads for the same
+ * reasons (manual guard + merged range).
+ */
+export async function updateEvent(
+  id: string,
+  patch: UpdateEventPatch,
+): Promise<CalendarEvent> {
+  if (getDataDriver() === "supabase") return updateEventSupabase(id, patch);
+
+  // A PATCH with nothing to change is a client bug: fail before any I/O.
+  if (isEmptyEventPatch(patch)) throw new DataLayerError("missing_fields");
+
+  const study = await requireStudy();
+  const row = fakeEventRows.find(
+    (entry) => entry.id === id && entry.studyId === study.id,
+  );
+  if (!row) throw new DataLayerError("save_failed");
+  if (row.source !== "manual") throw new DataLayerError("save_failed");
+
+  // Validate the MERGED result (patch over row) before touching the row.
+  const title =
+    patch.title !== undefined ? validateEventTitle(patch.title) : row.title;
+  const startAt = patch.startAt ?? row.startAt;
+  const endAt = patch.endAt ?? row.endAt;
+  validateEventRange(startAt, endAt);
+  const caseId = patch.caseId !== undefined ? patch.caseId : row.caseId;
+  if (
+    caseId !== null &&
+    !getStore().cases.some(
+      (entry) => entry.id === caseId && entry.studyId === study.id,
+    )
+  ) {
+    throw new DataLayerError("save_failed");
+  }
+  const categoryId =
+    patch.categoryId !== undefined ? patch.categoryId : row.categoryId;
+  if (
+    categoryId !== null &&
+    !fakeCategoryRows.some((entry) => entry.id === categoryId)
+  ) {
+    throw new DataLayerError("save_failed");
+  }
+
+  row.title = title;
+  row.startAt = startAt;
+  row.endAt = endAt;
+  row.caseId = caseId;
+  row.categoryId = categoryId;
+  if (patch.location !== undefined) row.location = patch.location;
+  if (patch.notes !== undefined) row.notes = patch.notes;
+  return mapFakeEvent(row);
+}
+
+/**
+ * Delete a MANUAL event (T5a "Eliminar", behind the confirm dialog).
+ * The same read-only guard as updateEvent: derived rows stay with their
+ * origin. Zero rows matched (unknown/foreign/derived) → save_failed, the
+ * removeStudioDay contract; the supabase branch pins study + source on the
+ * wire so RLS and the guard are one statement.
+ */
+export async function removeEvent(id: string): Promise<void> {
+  if (getDataDriver() === "supabase") return removeEventSupabase(id);
+
+  const study = await requireStudy();
+  const index = fakeEventRows.findIndex(
+    (entry) => entry.id === id && entry.studyId === study.id,
+  );
+  if (index === -1) throw new DataLayerError("save_failed");
+  if (fakeEventRows[index].source !== "manual") {
+    throw new DataLayerError("save_failed");
+  }
+  fakeEventRows.splice(index, 1);
 }
 
 /** Insertion order behind a full tie: fake ids are `event-{n}`; uuids score 0. */

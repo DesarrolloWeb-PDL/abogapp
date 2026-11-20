@@ -91,7 +91,8 @@ export interface AgendaShortcutTarget {
 
 export type AgendaShortcutAction =
   | { type: "view"; view: AgendaViewKind }
-  | { type: "today" };
+  | { type: "today" }
+  | { type: "create" };
 
 const SHORTCUT_VIEW_KEYS: Record<string, AgendaViewKind> = Object.fromEntries(
   AGENDA_VIEWS.map((view) => [AGENDA_VIEW_SHORTCUTS[view], view]),
@@ -100,10 +101,12 @@ const SHORTCUT_VIEW_KEYS: Record<string, AgendaViewKind> = Object.fromEntries(
 const SHORTCUT_EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 /**
- * The keyboard map: D/S/M/A/L switch views, H jumps to Hoy. It stays quiet
- * while a modifier is held (browser shortcuts remain the browser's) and
- * while the user is typing (the search box must keep every letter), and it
- * refuses views the narrow screen does not offer.
+ * The keyboard map: D/S/M/A/L switch views, H jumps to Hoy, C opens the
+ * "Nuevo evento" form (recon shortcuts row; not a view, so the narrow
+ * clamp never refuses it). It stays quiet while a modifier is held
+ * (browser shortcuts remain the browser's) and while the user is typing
+ * (the search box must keep every letter), and it refuses views the narrow
+ * screen does not offer.
  */
 export function agendaShortcutAction(
   event: AgendaShortcutKeyEvent,
@@ -119,6 +122,7 @@ export function agendaShortcutAction(
 
   const key = event.key.toLowerCase();
   if (key === "h") return { type: "today" };
+  if (key === "c") return { type: "create" };
   const view = SHORTCUT_VIEW_KEYS[key];
   if (!view) return null;
   if (narrow && !availableAgendaViews(true).includes(view)) return null;

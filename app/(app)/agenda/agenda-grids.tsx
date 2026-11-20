@@ -74,6 +74,8 @@ interface AgendaTimeGridProps extends AgendaGridProps {
   /** Día renders one column; Semana the seven days of the anchor's week. */
   mode: "dia" | "semana";
   anchor: string;
+  /** Opens the detail popover for a clicked event block (T5a). */
+  onSelectEvent?: (event: CalendarEvent, trigger: HTMLElement) => void;
 }
 
 /**
@@ -90,6 +92,7 @@ export function AgendaTimeGrid({
   today,
   toggles,
   nonWorkingDays,
+  onSelectEvent,
 }: AgendaTimeGridProps) {
   const days = mode === "dia" ? [anchor] : agendaWeekDays(anchor);
   const bucketed = agendaBucketByDay(events, days);
@@ -189,9 +192,13 @@ export function AgendaTimeGrid({
                     const placement = agendaEventPlacement(event, day);
                     if (!placement) return null;
                     return (
-                      <div
+                      <button
                         key={event.id}
-                        className="absolute z-0 overflow-hidden rounded-sm border-l-2 border-accent bg-accent-tint px-1.5 py-0.5 text-xs leading-snug text-text"
+                        type="button"
+                        onClick={(clickEvent) =>
+                          onSelectEvent?.(event, clickEvent.currentTarget)
+                        }
+                        className="absolute z-0 cursor-pointer overflow-hidden rounded-sm border-l-2 border-accent bg-accent-tint px-1.5 py-0.5 text-left text-xs leading-snug text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                         style={{
                           top: `${placement.topPercent}%`,
                           height: `${placement.heightPercent}%`,
@@ -207,7 +214,7 @@ export function AgendaTimeGrid({
                           {agendaClock(event.startAt)}
                         </span>{" "}
                         <span className="break-words">{event.title}</span>
-                      </div>
+                      </button>
                     );
                   });
                 })}
@@ -224,8 +231,10 @@ export function AgendaTimeGrid({
 
 interface AgendaMonthGridProps extends AgendaGridProps {
   anchor: string;
-  /** "+N más" opens that day in Día view (the T5 popover comes later). */
+  /** "+N más" opens that day in Día view. */
   onOpenDay: (day: string) => void;
+  /** Opens the detail popover for a clicked event line (T5a). */
+  onSelectEvent?: (event: CalendarEvent, trigger: HTMLElement) => void;
 }
 
 /**
@@ -241,6 +250,7 @@ export function AgendaMonthGrid({
   toggles,
   nonWorkingDays,
   onOpenDay,
+  onSelectEvent,
 }: AgendaMonthGridProps) {
   const cells = agendaMonthGrid(anchor);
   const bucketed = agendaBucketByDay(
@@ -308,12 +318,19 @@ export function AgendaMonthGrid({
                         </span>
                       )}
                       {dayEvents.slice(0, 2).map((event) => (
-                        <div key={event.id} className="truncate px-1 text-xs text-text">
+                        <button
+                          key={event.id}
+                          type="button"
+                          onClick={(clickEvent) =>
+                            onSelectEvent?.(event, clickEvent.currentTarget)
+                          }
+                          className="w-full truncate px-1 text-left text-xs text-text cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
                           <span className="tabular-nums text-text-muted">
                             {agendaClock(event.startAt)}
                           </span>{" "}
                           {event.title}
-                        </div>
+                        </button>
                       ))}
                       {overflow > 0 && (
                         <button

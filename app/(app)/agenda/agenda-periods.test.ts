@@ -156,6 +156,28 @@ describe("agendaShortcutAction", () => {
     });
   });
 
+  it("maps C (both cases) to the create action, narrow screens included", () => {
+    expect(agendaShortcutAction(key("c"), null, false)).toEqual({
+      type: "create",
+    });
+    expect(agendaShortcutAction(key("C"), null, false)).toEqual({
+      type: "create",
+    });
+    // Create is not a view — the narrow clamp never refuses it.
+    expect(agendaShortcutAction(key("c"), null, true)).toEqual({
+      type: "create",
+    });
+  });
+
+  it("keeps C quiet while typing or while a modifier is held", () => {
+    expect(agendaShortcutAction(key("c"), { tagName: "INPUT" }, false)).toBeNull();
+    expect(agendaShortcutAction(key("c"), { tagName: "TEXTAREA" }, false)).toBeNull();
+    expect(agendaShortcutAction(key("c"), null, true)).toEqual({ type: "create" });
+    expect(
+      agendaShortcutAction(key("c", { ctrlKey: true }), null, false),
+    ).toBeNull();
+  });
+
   it("ignores keys while a modifier is held (browser shortcuts stay ours)", () => {
     expect(agendaShortcutAction(key("d", { ctrlKey: true }), null, false)).toBeNull();
     expect(agendaShortcutAction(key("d", { metaKey: true }), null, false)).toBeNull();

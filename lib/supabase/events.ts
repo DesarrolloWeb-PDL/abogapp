@@ -27,11 +27,13 @@
 import { DataLayerError } from "@/lib/data/errors";
 import type {
   CalendarEvent,
+  CreateEventInput,
   EventCategory,
   EventListFilter,
   EventSource,
+  UpdateEventPatch,
 } from "@/lib/data/events";
-import { getMyStudy } from "@/lib/data/studies";
+import { getMyStudy, requireStudy } from "@/lib/data/studies";
 import { getBrowserClient } from "./client";
 
 // --- mirror of lib/data/events.ts (see the header note) --------------------
@@ -41,6 +43,9 @@ const EVENT_SOURCES: readonly string[] = [
   "vencimiento",
   "dia_inhabil",
 ];
+
+/** `events.title` check constraint: char_length between 1 and 300. */
+const EVENT_TITLE_MAX = 300;
 // -----------------------------------------------------------------------------
 
 /**
@@ -143,6 +148,149 @@ export async function listEventCategoriesSupabase(): Promise<EventCategory[]> {
     color: row.color,
     position: row.position,
   }));
+}
+
+/* ---------------------------------------------------- T5a: mutations ------ */
+
+/**
+ * Mirror of the facade's title bound/blank check (see the header note
+ * above EVENT_SOURCES): trimmed blank → missing_fields, over 300 →
+ * save_failed — the init.sql `char_length between 1 and 300` check.
+ */
+function validateEventTitle(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) throw new DataLayerError("missing_fields");
+  if (trimmed.length > EVENT_TITLE_MAX) throw new DataLayerError("save_failed");
+  return trimmed;
+}
+
+/** Mirror of the facade's `chk_event_range` check over parseable instants. */
+function validateEventRange(startAt: string, endAt: string): void {
+  const start = Date.parse(startAt);
+  const end = Date.parse(endAt);
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+    throw new DataLayerError("save_failed");
+  }
+}
+
+/**
+ * Create a MANUAL event (T5a). Same validation order as the fake branch —
+ * requireStudy, then title/range — so a typed refusal never depends on the
+ * driver; the case/category FKs are left to `fk_events_case` / the category
+ * FK (the composite FK rejects a foreign case with the same save_failed the
+ * fake branch raises locally). The insert selects EVENT_COLUMNS, so the
+ * returned row carries the same embeds the reads map (one mapper).
+ */
+export async function createEventSupabase(
+  input: CreateEventInput,
+): Promise<CalendarEvent> {
+  const study = await requireStudy();
+  const title = validateEventTitle(input.title);
+  validateEventRange(input.startAt, input.endAt);
+
+  const { data, error } = await getBrowserClient()
+    .from("events")
+    .insert({
+      study_id: study.id,
+      title,
+      start_at: input.startAt,
+      end_at: input.endAt,
+      case_id: input.caseId ?? null,
+      category_id: input.categoryId ?? null,
+      location: input.location ?? "",
+      notes: input.notes ?? "",
+      source: "manual", // the form never creates derived rows
+    })
+    .select(EVENT_COLUMNS)
+    .single();
+  if (error || !data) throw new DataLayerError("save_failed");
+
+  return mapEvent(data as unknown as EventRow);
+}
+
+/**
+ * Patch a MANUAL event (T5a). Pre-read first — one round trip buys the
+ * read-only guard (derived source → save_failed, no UPDATE ever sent) and
+ * the current start/end/title the merged validation needs (bulkArchive
+ * discipline: the WHOLE merged result validates before the single UPDATE,
+ * which is the only write). Then one UPDATE pinned to id + study, selecting
+ * EVENT_COLUMNS so the screen gets the mapped row back (updateTask pattern).
+ */
+export async function updateEventSupabase(
+  id: string,
+  patch: UpdateEventPatch,
+): Promise<CalendarEvent> {
+  // A PATCH with nothing to change is a client bug: fail before any I/O.
+  if (
+    patch.title === undefined &&
+    patch.startAt === undefined &&
+    patch.endAt === undefined &&
+    patch.caseId === undefined &&
+    patch.categoryId === undefined &&
+    patch.location === undefined &&
+    patch.notes === undefined
+  ) {
+    throw new DataLayerError("missing_fields");
+  }
+
+  const study = await requireStudy();
+  const supabase = getBrowserClient();
+
+  const { data: current, error: readError } = await supabase
+    .from("events")
+    .select("id, source, title, start_at, end_at")
+    .eq("id", id)
+    .eq("study_id", study.id)
+    .maybeSingle();
+  if (readError || !current) throw new DataLayerError("save_failed");
+  const live = current as { source: string; title: string; start_at: string; end_at: string };
+  if (live.source !== "manual") throw new DataLayerError("save_failed");
+
+  // Validate the MERGED result (patch over row) before the write.
+  const title =
+    patch.title !== undefined ? validateEventTitle(patch.title) : live.title;
+  validateEventRange(patch.startAt ?? live.start_at, patch.endAt ?? live.end_at);
+
+  const payload: Record<string, unknown> = {};
+  if (patch.title !== undefined) payload.title = title;
+  if (patch.startAt !== undefined) payload.start_at = patch.startAt;
+  if (patch.endAt !== undefined) payload.end_at = patch.endAt;
+  if (patch.caseId !== undefined) payload.case_id = patch.caseId;
+  if (patch.categoryId !== undefined) payload.category_id = patch.categoryId;
+  if (patch.location !== undefined) payload.location = patch.location;
+  if (patch.notes !== undefined) payload.notes = patch.notes;
+
+  const { data, error } = await supabase
+    .from("events")
+    .update(payload)
+    .eq("id", id)
+    .eq("study_id", study.id)
+    .select(EVENT_COLUMNS)
+    .single();
+  if (error || !data) throw new DataLayerError("save_failed");
+
+  return mapEvent(data as unknown as EventRow);
+}
+
+/**
+ * Delete a MANUAL event (T5a). Study AND source pinned on the wire: a
+ * foreign id, a derived row or an unknown id deletes zero rows →
+ * save_failed (removeStudioDay contract), so RLS, tenancy and the
+ * read-only guard are one statement.
+ */
+export async function removeEventSupabase(id: string): Promise<void> {
+  const study = await requireStudy();
+
+  const { data, error } = await getBrowserClient()
+    .from("events")
+    .delete()
+    .eq("id", id)
+    .eq("study_id", study.id)
+    .eq("source", "manual")
+    .select("id");
+  if (error || !data || data.length === 0) {
+    throw new DataLayerError("save_failed");
+  }
 }
 
 function mapEvent(row: EventRow): CalendarEvent {

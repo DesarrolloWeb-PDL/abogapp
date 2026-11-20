@@ -45,6 +45,8 @@ interface SeedEventOptions {
   source?: "manual" | "audiencia";
   hearingId?: string;
   location?: string;
+  caseId?: string;
+  notes?: string;
 }
 
 async function seedEvent(
@@ -62,6 +64,8 @@ async function seedEvent(
     source: options.source ?? "manual",
     ...(options.hearingId ? { hearing_id: options.hearingId } : {}),
     ...(options.location ? { location: options.location } : {}),
+    ...(options.caseId ? { case_id: options.caseId } : {}),
+    ...(options.notes ? { notes: options.notes } : {}),
   });
   return row.id;
 }
@@ -595,6 +599,278 @@ test.describe("S17 mobile 390", () => {
       await guard.assertClean();
     } finally {
       if (seeded) await cleanSeededEvents();
+    }
+  });
+});
+
+/* ------------------------------------------- T5a: create / edit / popover -- */
+
+test.describe("S17 T5a — event create, edit and detail popover", () => {
+  test("S17-8 C and Nuevo evento open the create form; an empty title refuses inline and a save lands the row", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const title = `E2E agenda ${stamp} creado`;
+
+    try {
+      await cleanSeededEvents();
+      await page.goto("/agenda");
+      // Hydration roundtrip BEFORE the first keystroke (L8 gotcha: keys
+      // pressed before the listener attaches are silently dropped).
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByRole("button", { name: "Nuevo evento" })).toHaveAttribute(
+        "aria-keyshortcuts",
+        "C",
+      );
+
+      // C opens the form and the datetime fields arrive prefilled (today,
+      // next whole hour — never empty, never in the past).
+      await page.keyboard.press("c");
+      const dialog = page.getByRole("dialog", { name: "Nuevo evento" });
+      await expect(dialog).toBeVisible();
+      await expect(page.getByLabel("Inicio", { exact: true })).toHaveValue(
+        /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/,
+      );
+      await expect(page.getByLabel("Fin", { exact: true })).toHaveValue(
+        /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/,
+      );
+      await expect(page.getByLabel("Título", { exact: true })).toBeFocused();
+
+      // Empty title → the inline Spanish field error, nothing is written.
+      await dialog.getByRole("button", { name: "Crear evento" }).click();
+      await expect(page.getByText("Poné un título para el evento.")).toBeVisible();
+      await expect(dialog).toBeVisible();
+
+      // Fill + save → success toast, dialog closes, the row shows up.
+      await page.getByLabel("Título", { exact: true }).fill(title);
+      await expectNoAxeViolations(page, "/agenda create form (T5a)");
+      await dialog.getByRole("button", { name: "Crear evento" }).click();
+      await expect(page.getByText("Creaste el evento.")).toBeVisible();
+      await expect(dialog).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: title, exact: true }),
+      ).toBeVisible();
+
+      // The top-bar affordance opens the same form, blank again; Esc closes.
+      await page.getByRole("button", { name: "Nuevo evento" }).click();
+      await expect(page.getByRole("dialog", { name: "Nuevo evento" })).toBeVisible();
+      await expect(page.getByLabel("Título", { exact: true })).toHaveValue("");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
+  test("S17-9 detail popover from a Lista row shows the event, then Editar round-trips the title", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const title = `E2E agenda ${stamp} edición`;
+    const newTitle = `E2E agenda ${stamp} editado`;
+    const artToday = toArtDate(new Date().toISOString());
+    const scope = await agendaScope();
+
+    try {
+      await cleanSeededEvents();
+      await seedEvent(scope, {
+        title,
+        startAt: `${artToday}T14:00:00.000-03:00`,
+        location: "Secretaría 4",
+        notes: "Traer la cédula.",
+        caseId: SEED.gomezId,
+      });
+
+      await page.goto("/agenda");
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+
+      // The row title is the popover trigger.
+      await page.getByRole("button", { name: title, exact: true }).click();
+      const popover = page.getByRole("dialog", {
+        name: `Detalle del evento: ${title}`,
+      });
+      await expect(popover).toBeVisible();
+      // Content: ART time, location + map link, expediente link, notes.
+      await expect(popover.getByText(/· 14:00 a 15:00/)).toBeVisible();
+      await expect(popover.getByText("Traer la cédula.")).toBeVisible();
+      await expect(
+        popover.getByRole("link", { name: "Abrir en el mapa" }),
+      ).toHaveAttribute("href", /google\.com\/maps\/search/);
+      await expect(
+        popover.getByRole("link", { name: SEED.caseGomez }),
+      ).toHaveAttribute("href", `/expedientes/${SEED.gomezId}`);
+      // No categories until T6: the color action hides itself (never invents).
+      await expect(
+        popover.getByRole("button", { name: "Cambiar color" }),
+      ).toHaveCount(0);
+      await expectNoAxeViolations(page, "/agenda detail popover (T5a)");
+
+      // Editar → prefilled form → save → toast + the updated row.
+      await popover.getByRole("button", { name: "Editar" }).click();
+      const editDialog = page.getByRole("dialog", { name: "Editar evento" });
+      await expect(editDialog).toBeVisible();
+      await expect(page.getByLabel("Título", { exact: true })).toHaveValue(title);
+      await expect(page.getByLabel("Inicio", { exact: true })).toHaveValue(
+        new RegExp(`${artToday}T14:00`),
+      );
+      await page.getByLabel("Título", { exact: true }).fill(newTitle);
+      await editDialog.getByRole("button", { name: "Guardar cambios" }).click();
+      await expect(page.getByText("Actualizamos el evento.")).toBeVisible();
+      await expect(editDialog).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: newTitle, exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: title, exact: true }),
+      ).toHaveCount(0);
+
+      // Esc on a freshly reopened popover closes it and restores focus.
+      await page.getByRole("button", { name: newTitle, exact: true }).click();
+      await expect(
+        page.getByRole("dialog", { name: `Detalle del evento: ${newTitle}` }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: newTitle, exact: true }),
+      ).toBeFocused();
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
+  test("S17-10 read-only audiencia popover: source action instead of edits, ⋯ without GCal/Assistant", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const title = `E2E agenda ${stamp} lectura`;
+    const artToday = toArtDate(new Date().toISOString());
+    const scope = await agendaScope();
+    let hearingId: string | null = null;
+
+    try {
+      await cleanSeededEvents();
+      hearingId = await seedHearing(
+        scope,
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      );
+      await seedEvent(scope, {
+        title,
+        startAt: `${artToday}T14:00:00.000-03:00`,
+        source: "audiencia",
+        hearingId,
+        caseId: SEED.gomezId,
+      });
+
+      await page.goto("/agenda");
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+
+      await page.getByRole("button", { name: title, exact: true }).click();
+      const popover = page.getByRole("dialog", {
+        name: `Detalle del evento: ${title}`,
+      });
+      await expect(popover).toBeVisible();
+      // Source badge + the recon's single action; the edit family is absent.
+      await expect(popover.getByText("Audiencia", { exact: true })).toBeVisible();
+      await expect(
+        popover.getByRole("link", { name: "Ver audiencia" }),
+      ).toHaveAttribute("href", `/expedientes/${SEED.gomezId}`);
+      await expect(popover.getByRole("button", { name: "Editar" })).toHaveCount(0);
+      await expect(
+        popover.getByRole("button", { name: "Cambiar color" }),
+      ).toHaveCount(0);
+
+      // ⋯ menu: Copiar enlace + Ver el expediente exist; Google Calendar and
+      // the Assistant are absent (no credentials / no assistant surface).
+      const menuTrigger = popover.getByRole("button", {
+        name: `Más acciones del evento ${title}`,
+      });
+      await menuTrigger.click();
+      const menu = page.getByRole("menu");
+      await expect(menu.getByRole("menuitem", { name: "Copiar enlace" })).toBeVisible();
+      await expect(
+        menu.getByRole("menuitem", { name: "Ver el expediente" }),
+      ).toBeVisible();
+      await expect(
+        menu.getByRole("menuitem", { name: "Abrir en Google Calendar" }),
+      ).toHaveCount(0);
+      await expect(
+        menu.getByRole("menuitem", { name: "Preguntar al Asistente IA" }),
+      ).toHaveCount(0);
+      await expectNoAxeViolations(page, "/agenda popover read-only (T5a)");
+
+      // Esc peels one layer at a time: the menu first, the popover second.
+      await page.keyboard.press("Escape");
+      await expect(menu).toHaveCount(0);
+      await expect(popover).toBeVisible();
+
+      // Copiar enlace copies THIS view's URL (no per-event permalink exists)
+      // and confirms with a toast.
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await menuTrigger.click();
+      await page.getByRole("menuitem", { name: "Copiar enlace" }).click();
+      await expect(page.getByText("Copiamos el enlace.")).toBeVisible();
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+      if (hearingId) await restSend("DELETE", `hearings?id=eq.${hearingId}`);
+    }
+  });
+
+  test("S17-11 a Día view event block opens the same detail popover", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const title = `E2E agenda ${stamp} bloque`;
+    const artToday = toArtDate(new Date().toISOString());
+    const scope = await agendaScope();
+
+    try {
+      await cleanSeededEvents();
+      await seedEvent(scope, {
+        title,
+        startAt: `${artToday}T14:00:00.000-03:00`,
+      });
+
+      await page.goto("/agenda");
+      await expect(
+        page.getByRole("button", { name: "Lista", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await page.keyboard.press("d");
+      await expect(page.getByRole("button", { name: "Día", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      // The absolutely positioned time-grid block is a real button now.
+      await page.getByRole("button", { name: /14:00/ }).click();
+      await expect(
+        page.getByRole("dialog", { name: `Detalle del evento: ${title}` }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
     }
   });
 });

@@ -62,6 +62,8 @@ interface AgendaTopBarProps {
   navDisabled: boolean;
   showWeekends: boolean;
   showNonWorkingDays: boolean;
+  /** Opens the create form (recon: **Nuevo evento** `C`). */
+  onNewEvent: () => void;
   onSwitchView: (view: AgendaViewKind) => void;
   onPrev: () => void;
   onNext: () => void;
@@ -77,6 +79,7 @@ export function AgendaTopBar({
   navDisabled,
   showWeekends,
   showNonWorkingDays,
+  onNewEvent,
   onSwitchView,
   onPrev,
   onNext,
@@ -165,6 +168,13 @@ export function AgendaTopBar({
           />
           Días inhábiles
         </label>
+        <Button
+          size="sm"
+          onClick={onNewEvent}
+          aria-keyshortcuts="C"
+        >
+          Nuevo evento
+        </Button>
       </div>
     </div>
   );
