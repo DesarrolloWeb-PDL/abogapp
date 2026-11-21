@@ -34,6 +34,7 @@ test.describe("mobile width 390", () => {
     await expect(bottomBar.getByRole("link", { name: "Expedientes" })).toBeVisible();
     await expect(bottomBar.getByRole("link", { name: "Bandeja" })).toBeVisible();
     await expect(bottomBar.getByRole("link", { name: "Avisos" })).toBeVisible();
+    await expect(bottomBar.getByRole("link", { name: "Agenda" })).toBeVisible();
 
     // The desktop sidebar (and its controls) is gone below 768 px.
     await expect(
@@ -43,6 +44,20 @@ test.describe("mobile width 390", () => {
     await expect(page.getByRole("link", { name: SEED.caseGomez })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await expectNoAxeViolations(page, "/expedientes at 390");
+    await guard.assertClean();
+  });
+
+  test("F02-E14 the bottom bar reaches Agenda at 390", async ({ page }) => {
+    const guard = guardPage(page);
+    await page.goto("/expedientes");
+    await page
+      .getByRole("navigation", { name: "Navegación principal" })
+      .getByRole("link", { name: "Agenda" })
+      .click();
+    await expect(page).toHaveURL(/\/agenda/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Agenda" }),
+    ).toBeVisible();
     await guard.assertClean();
   });
 

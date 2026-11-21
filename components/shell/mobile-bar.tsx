@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { Bell, FolderOpen, MessageSquare } from "lucide-react";
+import { Bell, CalendarDays, FolderOpen, MessageSquare } from "lucide-react";
 import { NotificationBell } from "@/components/shell/notification-bell";
 import { useUnreadCount } from "@/components/shell/use-unread-count";
 
@@ -30,6 +30,7 @@ const bottomItems: BottomItem[] = [
     icon: Bell,
     showsUnread: true,
   },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays },
 ];
 
 export function MobileHeader() {
