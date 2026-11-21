@@ -362,6 +362,16 @@ test.describe("S17 T4 — period views, navigation, shortcuts", () => {
         page.getByRole("heading", { name: currentHeading, exact: true }),
       ).toBeVisible();
 
+      // Month grid headers are Monday-first (columns come from agendaMonthGrid);
+      // scope to the month table via its "+N más" overflow, not the mini-month.
+      const monthTable = page
+        .locator("table")
+        .filter({ has: page.getByRole("button", { name: /\+\d+ más/ }) })
+        .first();
+      await expect(
+        monthTable.getByRole("columnheader").first(),
+      ).toHaveText("lun");
+
       // ‹ › walk one month each way (period navigation).
       await page.getByRole("button", { name: "Periodo anterior" }).click();
       await expect(
@@ -503,12 +513,17 @@ test.describe("S17 T4 — period views, navigation, shortcuts", () => {
       const plainBg = await bg(friHeader);
       expect(shadedBg).not.toBe(plainBg);
 
-      // …and drops to the plain surface with the toggle off.
-      await page.getByLabel("Fines de semana").uncheck();
+      // …and drops to the plain surface with the toggle off. Scoped to the
+      // top-bar group: T5b mirrors this state in the left panel's own
+      // "Fines de semana" checkbox (same label, other landmark).
+      const topToggles = page.getByRole("group", {
+        name: "Visibilidad de días",
+      });
+      await topToggles.getByLabel("Fines de semana").uncheck();
       await expect
         .poll(() => bg(satHeader))
         .toBe(plainBg);
-      await page.getByLabel("Fines de semana").check();
+      await topToggles.getByLabel("Fines de semana").check();
       await expect.poll(() => bg(satHeader)).not.toBe(plainBg);
 
       // The Días inhábiles toggle owns the "Inhábil" label.
@@ -544,10 +559,27 @@ test.describe("S17 mobile 390", () => {
     await expect(
       page.getByRole("navigation", { name: "Navegación principal" }),
     ).toBeVisible();
-    await expect(page.getByLabel("Buscar eventos")).toBeVisible();
+    // T5b: below lg the left panel hides behind its icon (recon: "narrow:
+    // left panel hidden behind icon") — search included.
+    const toggle = page.getByRole("button", { name: /panel de la agenda/ });
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByLabel("Buscar eventos")).toBeHidden();
+    // The empty copy renders only after the client fetch — hydration proof.
     await expect(
       page.getByText("Todavía no hay eventos en los próximos 30 días."),
     ).toBeVisible();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByLabel("Buscar eventos")).toBeVisible();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByLabel("Buscar eventos")).toBeHidden();
+    // Ctrl+K while hidden: reveal the panel AND land on the search (the
+    // deferred-focus path; the wide direct path is covered in S17-15).
+    await page.keyboard.press("Control+k");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByLabel("Buscar eventos")).toBeFocused();
     await expectNoHorizontalScroll(page);
     await expectNoAxeViolations(page, "/agenda at 390");
     await guard.assertClean();
@@ -1111,6 +1143,150 @@ test.describe("S17 T5a — event create, edit and detail popover", () => {
       await guard.assertClean();
     } finally {
       await cleanSeededEvents();
+    }
+  });
+});
+
+/* ---------------------------------------- T5b: left panel (mini-month) ---- */
+
+test.describe("S17 T5b — left panel mini-month", () => {
+  test("S17-15 dots, Ctrl+K focus, month nav and day click open Día", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const scope = await agendaScope();
+    const artToday = toArtDate(new Date().toISOString());
+    const day15 = `${artToday.slice(0, 7)}-15`;
+    const day15Slash = `${day15.slice(8, 10)}/${day15.slice(5, 7)}/${day15.slice(0, 4)}`;
+    const title = `E2E agenda ${stamp} mini`;
+    const panel = page.getByRole("complementary", {
+      name: "Panel de la agenda",
+    });
+
+    try {
+      await cleanSeededEvents();
+      // Day 15 of the current month: outside the Lista window whenever
+      // today > the 5th, so the dot proves the mini-month reads its OWN
+      // month (same filters) instead of borrowing the list's rows.
+      await seedEvent(scope, {
+        title,
+        startAt: `${day15}T14:00:00.000-03:00`,
+      });
+
+      await page.goto("/agenda");
+      // The dot needs hydration + the mini fetch → it doubles as the
+      // hydration proof before any keyboard use (L8 gotcha).
+      const dayButton = panel.getByRole("button", {
+        name: new RegExp(`${day15Slash}, 1 evento`),
+      });
+      await expect(dayButton).toBeVisible();
+
+      // Ctrl+K focuses the panel search in place (wide direct-focus path).
+      await page.keyboard.press("Control+k");
+      await expect(page.getByLabel("Buscar eventos")).toBeFocused();
+
+      // The mini-month nav steps the anchor's month (title round-trip);
+      // the dot returns because the month read refetches.
+      await panel.getByRole("button", { name: "Mes anterior" }).click();
+      await expect(
+        panel.getByText(prevMonthHeading(artToday), { exact: true }),
+      ).toBeVisible();
+      await panel.getByRole("button", { name: "Mes siguiente" }).click();
+      await expect(
+        panel.getByText(monthHeading(artToday), { exact: true }),
+      ).toBeVisible();
+      await expect(dayButton).toBeVisible();
+
+      // Clicking a day opens it in Día view (the "+N más" semantics).
+      await dayButton.click();
+      await expect(
+        page.getByRole("button", { name: "Día", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(
+        page.getByRole("heading", { name: new RegExp(day15Slash) }),
+      ).toBeVisible();
+      // The grid block's name carries the ART clock prefix (S17-11 pattern).
+      await expect(
+        page.getByRole("button", { name: `14:00 ${title}`, exact: true }),
+      ).toBeVisible();
+
+      await expectNoAxeViolations(page, "/agenda mini-month (T5b)");
+      await guard.assertClean();
+    } finally {
+      await cleanSeededEvents();
+    }
+  });
+
+  test("S17-16 hatched inhábiles carry a legend; both weekend checkboxes stay in sync", async ({
+    page,
+  }) => {
+    const guard = guardPage(page);
+    const stamp = Date.now();
+    const scope = await agendaScope();
+    const artToday = toArtDate(new Date().toISOString());
+    const hatchDay = `${artToday.slice(0, 7)}-15`;
+    const hatchSlash = `${hatchDay.slice(8, 10)}/${hatchDay.slice(5, 7)}/${hatchDay.slice(0, 4)}`;
+    const panel = page.getByRole("complementary", {
+      name: "Panel de la agenda",
+    });
+    const topToggles = page.getByRole("group", {
+      name: "Visibilidad de días",
+    });
+    // Tolerates a stray event on the same day: date, optional count, hatch.
+    const hatchButton = panel.getByRole("button", {
+      name: new RegExp(`${hatchSlash}(, \\d+ eventos?)?, día inhábil`),
+    });
+    const legend = panel.getByText("Día inhábil", { exact: true });
+
+    // Pre-clean (crashed-run leftovers) before inserting the studio day.
+    await restSend(
+      "DELETE",
+      `calendar_days?study_id=eq.${scope.study_id}&day=eq.${hatchDay}`,
+    );
+    try {
+      await cleanSeededEvents();
+      await restSend("POST", "calendar_days", {
+        study_id: scope.study_id,
+        day: hatchDay,
+        kind: "inhabil",
+        name: `E2E agenda panel ${stamp}`,
+      });
+
+      await page.goto("/agenda");
+      // The empty copy renders only after the client fetch → hydration
+      // proof before touching controls (static Jan/Jul feria could make
+      // the hatch itself render server-side).
+      await expect(
+        page.getByText("Todavía no hay eventos en los próximos 30 días."),
+      ).toBeVisible();
+      await expect(hatchButton).toBeVisible();
+      await expect(legend).toBeVisible();
+
+      // The top-bar Días inhábiles toggle gates the hatch AND its legend.
+      await page.getByLabel("Días inhábiles").uncheck();
+      await expect(hatchButton).toHaveCount(0);
+      await expect(legend).toHaveCount(0);
+      await page.getByLabel("Días inhábiles").check();
+      await expect(hatchButton).toBeVisible();
+      await expect(legend).toBeVisible();
+
+      // The panel's Fines de semana mirrors the top-bar toggle (one state).
+      const panelWeekend = panel.getByLabel("Fines de semana");
+      const topWeekend = topToggles.getByLabel("Fines de semana");
+      await expect(panelWeekend).toBeChecked();
+      await panelWeekend.uncheck();
+      await expect(topWeekend).not.toBeChecked();
+      await topWeekend.check();
+      await expect(panelWeekend).toBeChecked();
+
+      await expectNoAxeViolations(page, "/agenda hatch legend (T5b)");
+      await guard.assertClean();
+    } finally {
+      await restSend(
+        "DELETE",
+        `calendar_days?study_id=eq.${scope.study_id}&day=eq.${hatchDay}`,
+      );
     }
   });
 });

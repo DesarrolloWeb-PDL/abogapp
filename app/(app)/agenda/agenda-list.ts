@@ -1,10 +1,11 @@
 /**
  * Pure helpers behind the `/agenda` Lista view (S17, T2 slice 1): the
- * filter set the left panel will grow into (search + source overlays +
- * category checkboxes), the chips the empty state renders, the load
- * reducer that keeps the previous list visible while a refresh runs
- * (recon: "previous period stays visible with a thin top bar"), and the
- * ART day/time formatting for the rows.
+ * filter set the left panel grew into (search + source overlays +
+ * category checkboxes — T5b renders it in agenda-left-panel.tsx), the chips
+ * the empty state renders, the load reducer that keeps the previous list
+ * visible while a refresh runs (recon: "previous period stays visible with
+ * a thin top bar"), the T5b Ctrl+K search map, and the ART day/time
+ * formatting for the rows.
  *
  * Everything here is side-effect free on purpose: vitest is node-only (no
  * jsdom/RTL), so the interaction contract travels to e2e and only this
@@ -27,7 +28,7 @@ import type {
 import { toArtIsoDate } from "@/lib/data/calendar";
 import { formatDate } from "@/lib/format";
 
-/** The slice-1 filter set: list-level criteria only (the full left panel is T5). */
+/** The filter set the T5b left panel renders (list-level criteria only). */
 export interface AgendaFilters {
   /** Free text over title/location/notes/caratula (lib/search matching). */
   search: string;
@@ -283,4 +284,27 @@ export function formatTimeRange(startAt: string, endAt: string): string {
   const endClock = artClock(endAt);
   if (!startClock || !endClock) return "—";
   return `${startClock} a ${endClock}`;
+}
+
+/* ------------------------------------------------------- search keys ---- */
+
+/** The minimal key-event shape the Ctrl+K map reads (tests pass plain objects). */
+export interface AgendaSearchKeyEvent {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+}
+
+/**
+ * Ctrl+K / Cmd+K → focus the left-panel search (recon S17: "search
+ * (Ctrl+K)"). The exact chord: no Alt (AltGr on es-AR layouts is ctrl+alt)
+ * and no Shift, so the browser keeps its own modified bindings. The map is
+ * pure so RED tests can pin it without a DOM.
+ */
+export function agendaSearchShortcut(event: AgendaSearchKeyEvent): boolean {
+  if (event.altKey || event.shiftKey) return false;
+  if (!event.ctrlKey && !event.metaKey) return false;
+  return event.key.toLowerCase() === "k";
 }

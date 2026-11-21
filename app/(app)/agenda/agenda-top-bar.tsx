@@ -150,24 +150,32 @@ export function AgendaTopBar({
       </div>
 
       <div className="ml-auto flex flex-wrap items-center gap-x-4">
-        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text">
-          <input
-            type="checkbox"
-            className={CHECKBOX_CLASSES}
-            checked={showWeekends}
-            onChange={(event) => onToggleWeekends(event.target.checked)}
-          />
-          Fines de semana
-        </label>
-        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text">
-          <input
-            type="checkbox"
-            className={CHECKBOX_CLASSES}
-            checked={showNonWorkingDays}
-            onChange={(event) => onToggleNonWorkingDays(event.target.checked)}
-          />
-          Días inhábiles
-        </label>
+        {/* T5b: grouped for AT (and scoping) — the left panel mirrors the
+            Fines de semana state, so both checkboxes stay in sync. */}
+        <div
+          role="group"
+          aria-label="Visibilidad de días"
+          className="flex flex-wrap items-center gap-x-4"
+        >
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              className={CHECKBOX_CLASSES}
+              checked={showWeekends}
+              onChange={(event) => onToggleWeekends(event.target.checked)}
+            />
+            Fines de semana
+          </label>
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              className={CHECKBOX_CLASSES}
+              checked={showNonWorkingDays}
+              onChange={(event) => onToggleNonWorkingDays(event.target.checked)}
+            />
+            Días inhábiles
+          </label>
+        </div>
         <Button
           size="sm"
           onClick={onNewEvent}

@@ -4,6 +4,7 @@ import {
   DEFAULT_AGENDA_FILTERS,
   SOURCE_FILTER_OPTIONS,
   SOURCE_LABELS,
+  agendaSearchShortcut,
   type AgendaFilters,
   agendaFiltersActive,
   agendaLoadReducer,
@@ -350,5 +351,35 @@ describe("source vocabulary", () => {
     expect(sourceTone("audiencia")).toBe("info");
     expect(sourceTone("vencimiento")).toBe("warning");
     expect(sourceTone("dia_inhabil")).toBe("neutral");
+  });
+});
+
+describe("agendaSearchShortcut", () => {
+  it("matches Ctrl+K and Cmd+K, case-insensitively", () => {
+    expect(agendaSearchShortcut({ key: "k", ctrlKey: true })).toBe(true);
+    expect(agendaSearchShortcut({ key: "K", ctrlKey: true })).toBe(true);
+    expect(agendaSearchShortcut({ key: "k", metaKey: true })).toBe(true);
+    expect(
+      agendaSearchShortcut({ key: "k", ctrlKey: true, metaKey: true }),
+    ).toBe(true);
+  });
+
+  it("refuses plain keys and other chords", () => {
+    expect(agendaSearchShortcut({ key: "k" })).toBe(false);
+    expect(agendaSearchShortcut({ key: "d", ctrlKey: true })).toBe(false);
+    expect(agendaSearchShortcut({ key: "j", metaKey: true })).toBe(false);
+    expect(agendaSearchShortcut({ key: "Enter", ctrlKey: true })).toBe(false);
+  });
+
+  it("refuses AltGr (ctrl+alt) and Shift combinations", () => {
+    expect(agendaSearchShortcut({ key: "k", ctrlKey: true, altKey: true })).toBe(
+      false,
+    );
+    expect(
+      agendaSearchShortcut({ key: "k", ctrlKey: true, shiftKey: true }),
+    ).toBe(false);
+    expect(
+      agendaSearchShortcut({ key: "k", metaKey: true, altKey: true }),
+    ).toBe(false);
   });
 });

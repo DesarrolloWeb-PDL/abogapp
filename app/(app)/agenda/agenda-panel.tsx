@@ -5,7 +5,6 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -22,17 +21,16 @@ import {
 import { toArtIsoDate } from "@/lib/data/calendar";
 import {
   DEFAULT_AGENDA_FILTERS,
-  SOURCE_FILTER_OPTIONS,
   SOURCE_LABELS,
   agendaFiltersActive,
   agendaLoadReducer,
+  agendaSearchShortcut,
   buildFilterChips,
   formatDayHeading,
   formatTimeRange,
   groupByDay,
   sourceTone,
   toEventListFilter,
-  toggleValue,
   type AgendaFilterChip,
   type AgendaFilters,
 } from "./agenda-list";
@@ -56,6 +54,8 @@ import { AgendaEventForm } from "./agenda-event-form";
 import { AgendaEventPopover } from "./agenda-event-popover";
 import { AgendaTimeGrid, AgendaMonthGrid, AgendaYearGrid } from "./agenda-grids";
 import { AgendaTopBar, useAgendaNarrowViewport } from "./agenda-top-bar";
+import { AgendaLeftPanel } from "./agenda-left-panel";
+import { miniMonthEventFilter } from "./agenda-mini-month";
 
 /**
  * Agenda Lista panel (S17) — the list surface shared by `/agenda` (T2,
@@ -88,10 +88,15 @@ import { AgendaTopBar, useAgendaNarrowViewport } from "./agenda-top-bar";
  * The page header (h1 + subtitle) belongs to the caller: the tab renders
  * its own h2 under the case's h1, this panel never owns an heading level.
  * The top bar's period title IS this panel's h2.
+ *
+ * T5b adds the left panel (agenda-left-panel.tsx): Ctrl+K focuses its
+ * search, its mini-month reads the displayed month through the SAME
+ * filter pipeline (one `fetchMiniMonth` beside `fetchEvents`), and below
+ * lg it hides behind an icon (recon: "narrow: left panel hidden behind
+ * icon") while from lg up it is a persistent 260px column. The case tab
+ * renders this very component, so the tab IS the scoped panel (recon:
+ * "expediente tab Agenda = scoped version") — one copy, no fork.
  */
-
-const CHECKBOX_CLASSES =
-  "size-5 rounded-sm border-border-input accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 const LINK_CLASSES =
   "font-medium text-accent underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
@@ -133,6 +138,17 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
   const [inhabilDays, setInhabilDays] = useState<ReadonlySet<string>>(
     () => new Set(nonWorkingDays),
   );
+  // --- T5b: left panel (Ctrl+K search, mini-month dots, narrow toggle) ----
+  // Visibility is CSS-driven: from `lg` up the panel is a persistent 260px
+  // column; below lg it hides behind its icon unless `panelOpen` (recon:
+  // "narrow: left panel hidden behind icon"). SSR and hydration agree
+  // because no media query runs during the first render.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [miniEvents, setMiniEvents] = useState<CalendarEvent[]>([]);
+  // Newest-request token for the mini-month dot read (fetchEvents pattern).
+  const miniRequestRef = useRef(0);
+  // Ctrl+K while the panel is hidden: open it, focus on the next commit.
+  const pendingSearchFocus = useRef(false);
   // --- T5a: event popover + create/edit form -----------------------------
   // Popover = {event, trigger element}; editor = create (prefilled values:
   // `C`/top-bar → the day default, a Día free slot → its range) or edit
@@ -196,6 +212,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
         : "Actualizamos el evento.",
     );
     fetchEvents({ search: debouncedSearch, sources, categoryIds });
+    fetchMiniMonth({ search: debouncedSearch, sources, categoryIds });
   }
 
   const dayToggles: AgendaDayToggles = {
@@ -247,6 +264,33 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
     [caseId, view, anchor],
   );
 
+  // The mini-month dot read: the SAME filters (toEventListFilter → the
+  // driver's applyEventFilters) over the displayed month's window, pinned
+  // by caseId on the case tab. Keyed by MONTH (not day) so stepping days
+  // inside a month never refetches; a failure keeps the previous dots —
+  // they are auxiliary and must never take the panel down.
+  const miniMonthKey = anchor.slice(0, 7);
+  const fetchMiniMonth = useCallback(
+    (snapshot: AgendaFilters) => {
+      const criteria = miniMonthEventFilter(
+        snapshot,
+        caseId,
+        `${miniMonthKey}-01`,
+      );
+      if (!criteria) return;
+      const requestId = ++miniRequestRef.current;
+      listEvents(criteria)
+        .then((events) => {
+          if (requestId !== miniRequestRef.current) return;
+          setMiniEvents(events);
+        })
+        .catch(() => {
+          // Dots are advisory: keep the last set, degrade, never crash.
+        });
+    },
+    [caseId, miniMonthKey],
+  );
+
   // Categories load once per mount; a failure only hides the (still empty
   // until T6) category UI — it must never take the agenda down with it.
   const fetchCategories = useCallback(() => {
@@ -268,14 +312,51 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
     fetchNonWorkingDays();
   }, [fetchCategories, fetchNonWorkingDays]);
 
-  // D/S/M/A/L + H (recon shortcuts) + C = Nuevo evento (T5a). Quiet while a
-  // modifier is held or the user is typing (the search box keeps every
-  // letter), while the create/edit form owns the screen (its buttons are
-  // legitimate key targets too), and a narrow screen refuses unavailable
-  // views. The handler re-subscribes when the guard inputs change.
+  // --- T5b: Ctrl+K focus plumbing ----------------------------------------
+  /**
+   * Ctrl+K (recon: "search (Ctrl+K)"): focus the panel search in place
+   * when it is already on screen (wide, or narrow with the panel open);
+   * otherwise open the panel first — a display:none input cannot take
+   * focus — and land on the next commit. getElementById follows the
+   * agenda-event-form focus pattern (the Input primitive takes no ref).
+   */
+  function focusSearch() {
+    const input = document.getElementById("agenda-search");
+    if (input instanceof HTMLInputElement && input.offsetParent !== null) {
+      input.focus();
+      return;
+    }
+    pendingSearchFocus.current = true;
+    setPanelOpen(true);
+  }
+
+  // Deferred half of focusSearch: the commit that revealed the input has
+  // landed, so the queued focus runs. DOM focus only — no setState in an
+  // effect (react-hooks/set-state-in-effect stays clean).
+  useEffect(() => {
+    if (!pendingSearchFocus.current) return;
+    const input = document.getElementById("agenda-search");
+    if (!(input instanceof HTMLInputElement)) return;
+    pendingSearchFocus.current = false;
+    input.focus();
+  }, [panelOpen]);
+
+  // D/S/M/A/L + H (recon shortcuts) + C = Nuevo evento (T5a) + Ctrl+K
+  // (T5b). Quiet while a modifier is held on the letter map (the search
+  // box keeps every letter), while the create/edit form owns the screen
+  // (its buttons are legitimate key targets too), and a narrow screen
+  // refuses unavailable views. The handler re-subscribes when the guard
+  // inputs change.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (editor) return;
+      // Chord before the letter map: agendaShortcutAction refuses every
+      // modifier, so Ctrl+K would otherwise be dropped without a focus.
+      if (agendaSearchShortcut(event)) {
+        event.preventDefault();
+        focusSearch();
+        return;
+      }
       const action = agendaShortcutAction(event, document.activeElement, narrow);
       if (!action) return;
       event.preventDefault();
@@ -298,6 +379,11 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
   useEffect(() => {
     fetchEvents({ search: debouncedSearch, sources, categoryIds });
   }, [debouncedSearch, sources, categoryIds, fetchEvents]);
+  // The dot read rides the same criteria (debounce included), so the
+  // mini-month always shows WHERE the filtered events fall.
+  useEffect(() => {
+    fetchMiniMonth({ search: debouncedSearch, sources, categoryIds });
+  }, [debouncedSearch, sources, categoryIds, fetchMiniMonth]);
 
   // Debounce the search box (300ms); checkboxes apply on the next tick.
   useEffect(() => {
@@ -328,6 +414,7 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
     fetchCategories();
     fetchNonWorkingDays();
     fetchEvents({ search: debouncedSearch, sources, categoryIds });
+    fetchMiniMonth({ search: debouncedSearch, sources, categoryIds });
   }
 
   const periodTitle = agendaPeriodTitle(view, anchor, UPCOMING_DAYS);
@@ -374,266 +461,211 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
         onNewEvent={openCreate}
       />
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex min-w-56 flex-1 flex-col gap-2 sm:max-w-lg">
-          <span className="text-sm font-semibold text-text">
-            Buscar eventos
-          </span>
-          <Input
-            type="search"
-            value={filters.search}
-            onChange={(event) => updateFilters({ search: event.target.value })}
-            placeholder="Título, lugar, notas o expediente"
-          />
-        </label>
+      {/* T5b: the left panel (260px column from `lg` up, icon-toggled
+          below) sits BESIDE the period content; the top bar stays full
+          width above the row. */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <AgendaLeftPanel
+          open={panelOpen}
+          filters={filters}
+          categories={categories}
+          showClear={showBarClear}
+          toggles={dayToggles}
+          nonWorkingDays={inhabilDays}
+          anchor={anchor}
+          today={today}
+          miniEvents={miniEvents}
+          onToggleOpen={() => setPanelOpen((prev) => !prev)}
+          onFiltersChange={updateFilters}
+          onToggleWeekends={setShowWeekends}
+          onOpenDay={openDay}
+          onShiftMonth={(direction) =>
+            setAnchor((prev) => shiftAgendaPeriod("mes", prev, direction))
+          }
+          onClear={clearFilters}
+        />
 
-        <fieldset className="flex flex-col gap-1">
-          <legend className="mb-1 text-sm font-semibold text-text">
-            Tipos de evento
-          </legend>
-          <div className="flex flex-wrap items-center gap-x-4">
-            {SOURCE_FILTER_OPTIONS.map((option) => (
-              <label
-                key={option.value}
-                className="flex min-h-11 cursor-pointer items-center gap-2 text-base text-text"
-              >
-                <input
-                  type="checkbox"
-                  className={CHECKBOX_CLASSES}
-                  checked={filters.sources.includes(option.value)}
-                  onChange={() =>
-                    updateFilters({
-                      sources: toggleValue(filters.sources, option.value),
-                    })
-                  }
-                />
-                {option.label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
 
-        {/* Dormant until T6 seeds the evidenced defaults ([] = hidden). */}
-        {categories.length > 0 && (
-          <fieldset className="flex flex-col gap-1">
-            <legend className="mb-1 text-sm font-semibold text-text">
-              Categorías
-            </legend>
-            <div className="flex flex-wrap items-center gap-x-4">
-              {categories.map((category) => (
-                <label
-                  key={category.id}
-                  className="flex min-h-11 cursor-pointer items-center gap-2 text-base text-text"
-                >
-                  <input
-                    type="checkbox"
-                    className={CHECKBOX_CLASSES}
-                    checked={filters.categoryIds.includes(category.id)}
-                    onChange={() =>
-                      updateFilters({
-                        categoryIds: toggleValue(
-                          filters.categoryIds,
-                          category.id,
-                        ),
-                      })
-                    }
-                  />
-                  <span
-                    aria-hidden="true"
-                    className="size-2.5 shrink-0 rounded-pill"
-                    style={{ backgroundColor: category.color }}
-                  />
-                  {category.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
-
-        {showBarClear && (
-          <Button variant="secondary" onClick={clearFilters}>
-            Limpiar filtros
-          </Button>
-        )}
-      </div>
-
-      {state.status === "loading" && (
-        <div
-          className="rounded-lg border border-border bg-surface p-4"
-          aria-busy="true"
-        >
-          <p role="status" className="sr-only">
-            Cargando eventos
-          </p>
-          <SkeletonRows rows={5} />
-        </div>
-      )}
-
-      {state.status === "error" && (
-        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-surface px-6 py-12 text-center">
-          <p className="text-base text-text-muted">
-            No pudimos cargar la agenda
-          </p>
-          <Button variant="secondary" onClick={retry}>
-            Reintentar
-          </Button>
-        </div>
-      )}
-
-      {ready !== null && ready.events.length === 0 && active && (
-        <div className="flex flex-col items-center gap-4 rounded-lg border border-border bg-surface px-6 py-12 text-center">
-          <p className="text-base text-text-muted">
-            No hay eventos con estos filtros
-          </p>
-          <div
-            role="group"
-            aria-label="Filtros activos"
-            className="flex flex-wrap justify-center gap-2"
-          >
-            {buildFilterChips(filters, categories).map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={() => removeChip(chip)}
-                aria-label={`Quitar filtro ${chip.label}`}
-                className={CHIP_CLASSES}
-              >
-                {chip.label}
-                <X aria-hidden="true" className="size-3.5" />
-              </button>
-            ))}
-          </div>
-          <Button variant="secondary" onClick={clearFilters}>
-            Limpiar filtros
-          </Button>
-        </div>
-      )}
-
-      {ready !== null && ready.events.length === 0 && !active && (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface px-6 py-12 text-center">
-          <p className="text-base text-text-muted">
-            {view === "lista"
-              ? `Todavía no hay eventos en los próximos ${UPCOMING_DAYS} días.`
-              : "No hay eventos en este período."}
-          </p>
-        </div>
-      )}
-
-      {ready !== null && ready.events.length > 0 && (
-        <div
-          className="flex flex-col gap-4"
-          aria-busy={ready.refreshing || undefined}
-        >
-          {ready.refreshing && (
-            <>
-              <div
-                aria-hidden="true"
-                className="h-0.5 w-full overflow-hidden rounded-pill bg-border"
-              >
-                <div className="h-full w-1/3 animate-pulse rounded-pill bg-accent" />
-              </div>
+          {state.status === "loading" && (
+            <div
+              className="rounded-lg border border-border bg-surface p-4"
+              aria-busy="true"
+            >
               <p role="status" className="sr-only">
-                Actualizando los eventos
+                Cargando eventos
               </p>
-            </>
+              <SkeletonRows rows={5} />
+            </div>
           )}
 
-          {view === "lista" &&
-            groupByDay(ready.events).map((group) => (
-              <section key={group.day} className="flex flex-col gap-2">
-                <h2 className="text-xs font-medium uppercase tracking-wide text-text-muted">
-                  {formatDayHeading(group.day)}
-                </h2>
-                <ul className="flex flex-col gap-3">
-                  {group.events.map((event) => (
-                    <li
-                      key={event.id}
-                      className="flex min-h-11 flex-col gap-1.5 rounded-lg border border-border bg-surface px-4 py-4 shadow-card"
-                    >
-                      <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
-                        <span className="tabular-nums">
-                          {formatTimeRange(event.startAt, event.endAt)}
-                        </span>
-                        {event.source !== "manual" && (
-                          <Badge tone={sourceTone(event.source)}>
-                            {SOURCE_LABELS[event.source]}
-                          </Badge>
-                        )}
-                        {event.category && (
-                          <Badge tone="neutral">
-                            <span
-                              aria-hidden="true"
-                              className="size-1.5 rounded-full"
-                              style={{ backgroundColor: event.category.color }}
-                            />
-                            {event.category.name}
-                          </Badge>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(clickEvent) =>
-                          openPopover(event, clickEvent.currentTarget)
-                        }
-                        className="cursor-pointer rounded-sm text-left text-base font-semibold text-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                      >
-                        {event.title}
-                      </button>
-                      {event.location && (
-                        <p className="text-base text-text-muted">
-                          {event.location}
-                        </p>
-                      )}
-                      {event.caseId && event.caseCaratula && (
-                        <Link
-                          href={`/expedientes/${event.caseId}`}
-                          className={LINK_CLASSES}
+          {state.status === "error" && (
+            <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-surface px-6 py-12 text-center">
+              <p className="text-base text-text-muted">
+                No pudimos cargar la agenda
+              </p>
+              <Button variant="secondary" onClick={retry}>
+                Reintentar
+              </Button>
+            </div>
+          )}
+
+          {ready !== null && ready.events.length === 0 && active && (
+            <div className="flex flex-col items-center gap-4 rounded-lg border border-border bg-surface px-6 py-12 text-center">
+              <p className="text-base text-text-muted">
+                No hay eventos con estos filtros
+              </p>
+              <div
+                role="group"
+                aria-label="Filtros activos"
+                className="flex flex-wrap justify-center gap-2"
+              >
+                {buildFilterChips(filters, categories).map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    onClick={() => removeChip(chip)}
+                    aria-label={`Quitar filtro ${chip.label}`}
+                    className={CHIP_CLASSES}
+                  >
+                    {chip.label}
+                    <X aria-hidden="true" className="size-3.5" />
+                  </button>
+                ))}
+              </div>
+              <Button variant="secondary" onClick={clearFilters}>
+                Limpiar filtros
+              </Button>
+            </div>
+          )}
+
+          {ready !== null && ready.events.length === 0 && !active && (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface px-6 py-12 text-center">
+              <p className="text-base text-text-muted">
+                {view === "lista"
+                  ? `Todavía no hay eventos en los próximos ${UPCOMING_DAYS} días.`
+                  : "No hay eventos en este período."}
+              </p>
+            </div>
+          )}
+
+          {ready !== null && ready.events.length > 0 && (
+            <div
+              className="flex flex-col gap-4"
+              aria-busy={ready.refreshing || undefined}
+            >
+              {ready.refreshing && (
+                <>
+                  <div
+                    aria-hidden="true"
+                    className="h-0.5 w-full overflow-hidden rounded-pill bg-border"
+                  >
+                    <div className="h-full w-1/3 animate-pulse rounded-pill bg-accent" />
+                  </div>
+                  <p role="status" className="sr-only">
+                    Actualizando los eventos
+                  </p>
+                </>
+              )}
+
+              {view === "lista" &&
+                groupByDay(ready.events).map((group) => (
+                  <section key={group.day} className="flex flex-col gap-2">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                      {formatDayHeading(group.day)}
+                    </h2>
+                    <ul className="flex flex-col gap-3">
+                      {group.events.map((event) => (
+                        <li
+                          key={event.id}
+                          className="flex min-h-11 flex-col gap-1.5 rounded-lg border border-border bg-surface px-4 py-4 shadow-card"
                         >
-                          {event.caseCaratula}
-                        </Link>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+                          <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+                            <span className="tabular-nums">
+                              {formatTimeRange(event.startAt, event.endAt)}
+                            </span>
+                            {event.source !== "manual" && (
+                              <Badge tone={sourceTone(event.source)}>
+                                {SOURCE_LABELS[event.source]}
+                              </Badge>
+                            )}
+                            {event.category && (
+                              <Badge tone="neutral">
+                                <span
+                                  aria-hidden="true"
+                                  className="size-1.5 rounded-full"
+                                  style={{ backgroundColor: event.category.color }}
+                                />
+                                {event.category.name}
+                              </Badge>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(clickEvent) =>
+                              openPopover(event, clickEvent.currentTarget)
+                            }
+                            className="cursor-pointer rounded-sm text-left text-base font-semibold text-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          >
+                            {event.title}
+                          </button>
+                          {event.location && (
+                            <p className="text-base text-text-muted">
+                              {event.location}
+                            </p>
+                          )}
+                          {event.caseId && event.caseCaratula && (
+                            <Link
+                              href={`/expedientes/${event.caseId}`}
+                              className={LINK_CLASSES}
+                            >
+                              {event.caseCaratula}
+                            </Link>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
 
-          {(view === "dia" || view === "semana") && (
-            <AgendaTimeGrid
-              mode={view}
-              anchor={anchor}
-              events={ready.events}
-              today={today}
-              toggles={dayToggles}
-              nonWorkingDays={inhabilDays}
-              onSelectEvent={openPopover}
-              onCreateSlot={openCreateSlot}
-            />
-          )}
+              {(view === "dia" || view === "semana") && (
+                <AgendaTimeGrid
+                  mode={view}
+                  anchor={anchor}
+                  events={ready.events}
+                  today={today}
+                  toggles={dayToggles}
+                  nonWorkingDays={inhabilDays}
+                  onSelectEvent={openPopover}
+                  onCreateSlot={openCreateSlot}
+                />
+              )}
 
-          {view === "mes" && (
-            <AgendaMonthGrid
-              anchor={anchor}
-              events={ready.events}
-              today={today}
-              toggles={dayToggles}
-              nonWorkingDays={inhabilDays}
-              onOpenDay={openDay}
-              onSelectEvent={openPopover}
-            />
-          )}
+              {view === "mes" && (
+                <AgendaMonthGrid
+                  anchor={anchor}
+                  events={ready.events}
+                  today={today}
+                  toggles={dayToggles}
+                  nonWorkingDays={inhabilDays}
+                  onOpenDay={openDay}
+                  onSelectEvent={openPopover}
+                />
+              )}
 
-          {view === "anio" && (
-            <AgendaYearGrid
-              anchor={anchor}
-              events={ready.events}
-              today={today}
-              toggles={dayToggles}
-              nonWorkingDays={inhabilDays}
-            />
+              {view === "anio" && (
+                <AgendaYearGrid
+                  anchor={anchor}
+                  events={ready.events}
+                  today={today}
+                  toggles={dayToggles}
+                  nonWorkingDays={inhabilDays}
+                />
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
 
       {/* T5a overlays: the detail popover (anchored to its trigger) and the
           create/edit form; one copy of each serves /agenda and the case tab. */}
@@ -644,9 +676,10 @@ export function AgendaPanel({ caseId }: { caseId?: string }) {
           categories={categories}
           onClose={closePopover}
           onEdit={openEdit}
-          onChanged={() =>
-            fetchEvents({ search: debouncedSearch, sources, categoryIds })
-          }
+          onChanged={() => {
+            fetchEvents({ search: debouncedSearch, sources, categoryIds });
+            fetchMiniMonth({ search: debouncedSearch, sources, categoryIds });
+          }}
         />
       )}
 
