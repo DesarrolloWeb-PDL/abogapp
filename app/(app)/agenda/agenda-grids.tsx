@@ -12,6 +12,7 @@ import { formatDate } from "@/lib/format";
 import {
   AGENDA_MONTH_NAMES,
   AGENDA_WEEKDAY_SHORT,
+  AGENDA_WEEKDAY_SHORT_MONDAY,
   agendaBucketByDay,
   agendaClock,
   agendaDayShaded,
@@ -418,7 +419,7 @@ export function AgendaMonthGrid({
       <table className="w-full table-fixed border-collapse">
         <thead>
           <tr>
-            {AGENDA_WEEKDAY_SHORT.map((name) => (
+            {AGENDA_WEEKDAY_SHORT_MONDAY.map((name) => (
               <th
                 key={name}
                 scope="col"
@@ -553,7 +554,7 @@ export function AgendaYearGrid({
             <table className="w-full table-fixed border-collapse">
               <thead>
                 <tr>
-                  {AGENDA_WEEKDAY_SHORT.map((name) => (
+                  {AGENDA_WEEKDAY_SHORT_MONDAY.map((name) => (
                     <th
                       key={name}
                       scope="col"

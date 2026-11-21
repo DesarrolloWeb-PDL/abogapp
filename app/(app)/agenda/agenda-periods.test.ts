@@ -5,6 +5,7 @@ import {
   AGENDA_VIEWS,
   AGENDA_VIEW_LABELS,
   AGENDA_VIEW_SHORTCUTS,
+  AGENDA_WEEKDAY_SHORT_MONDAY,
   agendaBucketByDay,
   agendaClock,
   agendaDayShaded,
@@ -359,6 +360,32 @@ describe("isAgendaDay / agendaWeekStart / isoWeekNumber", () => {
     expect(isoWeekNumber("2026-10-19")).toBe(43); // recon's evidenced week
     expect(isoWeekNumber("2026-11-23")).toBe(48);
     expect(isoWeekNumber("2026-12-31")).toBe(53); // 2026 is a 53-week year
+  });
+});
+
+describe("AGENDA_WEEKDAY_SHORT_MONDAY", () => {
+  it("is the Monday-first rotation of AGENDA_WEEKDAY_SHORT", () => {
+    expect(AGENDA_WEEKDAY_SHORT_MONDAY).toEqual([
+      "lun",
+      "mar",
+      "mié",
+      "jue",
+      "vie",
+      "sáb",
+      "dom",
+    ]);
+  });
+
+  it("labels every agendaMonthGrid column from its actual weekday", () => {
+    const cells = agendaMonthGrid("2026-11-15"); // Monday-first, 42 cells
+    expect(cells).toHaveLength(42);
+    for (let index = 0; index < cells.length; index += 1) {
+      const dow = (new Date(`${cells[index].day}T12:00:00Z`).getUTCDay() + 6) % 7;
+      expect(dow).toBe(index % 7); // the grid contract the headers ride on
+      expect(AGENDA_WEEKDAY_SHORT_MONDAY[index % 7]).toBe(
+        AGENDA_WEEKDAY_SHORT_MONDAY[dow],
+      );
+    }
   });
 });
 

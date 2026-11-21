@@ -552,3 +552,13 @@ export const AGENDA_WEEKDAY_SHORT = [
   "vie",
   "sáb",
 ] as const;
+
+/**
+ * Monday-first rotation of {@link AGENDA_WEEKDAY_SHORT} for every table whose
+ * columns come from the Monday-started `agendaMonthGrid` (Mes/Año headers,
+ * mini-month). `AGENDA_WEEKDAY_SHORT` itself stays `Date#getUTCDay`-ordered.
+ */
+export const AGENDA_WEEKDAY_SHORT_MONDAY = [
+  ...AGENDA_WEEKDAY_SHORT.slice(1),
+  AGENDA_WEEKDAY_SHORT[0],
+] as const;
