@@ -30,7 +30,7 @@ Task creation and assignment,tareas,must,yes,partial,F04; three clicks on the ha
 Task states (five defaults + custom),tareas,must,yes,partial,S16; Pendiente / En curso / Para revisar / Completada / Cancelada | M2: five defaults read from task_statuses + row transitions ship; custom-state management (settings screen) pending
 Kanban board and list views,tareas,should,yes,partial,S16; group by estado / responsable / prioridad / expediente | M2: list view with estado filter + search ships; board / grouping / drag pending
 AI-created tasks (Procurador IA),tareas,could,yes,no,S16 filter Creada por; source actuacion + plazo
-Shared studio calendar (five views),agenda,should,yes,partial,S17; Dia / Semana / Mes / Año / Lista | M2: driver + 5 views + full event CRUD (create/edit/duplicate/delete-confirm, C shortcut, day drag-create) + detail popover + case tab (e2e s17+s08); pending: left panel (Ctrl+K, mini-month, categories), categories/overlays, mobile bottom-bar entry, "Ir al proximo"
+Shared studio calendar (five views),agenda,should,yes,partial,S17; Dia / Semana / Mes / Año / Lista | M2: driver + 5 views + full event CRUD + left panel (Ctrl+K search, mini-month, source filters) + case tab (e2e s17+s08); pending: categories/overlays (T6, evidence gap schema.sql:836), mobile bottom-bar entry, "Ir al proximo", GCal status row
 Categories and audiencias / vencimientos overlays,agenda,should,yes,no,S17; six default categories with 11 colors
 Create event from reader shortcuts,agenda,should,yes,no,S06 and S11 Crear evento shortcut
 Google Calendar sync,agenda,could,yes,no,S12 and S17; Google Calendar status row
